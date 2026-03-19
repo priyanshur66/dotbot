@@ -89,6 +89,7 @@ function createAgentService({
 
     const systemPrompt = buildAgentSystemPrompt({
       backendWalletAddress: backendSigner.address,
+      connectedWalletAddress: walletAddress,
       chainId: network.chainId,
     });
 

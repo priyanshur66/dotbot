@@ -7,15 +7,44 @@ const {
 } = require("../types/agentAction");
 const { normalizeAddress } = require("../utils/erc20");
 
-function createDeployFixedSupplyTokenTool({ launchOrchestrator, deploymentService, emitActions }) {
+function deriveSymbolFromName(name) {
+  const normalizedName = String(name || "").trim();
+  const compact = normalizedName.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (!compact) {
+    return "TOKEN";
+  }
+
+  const words = normalizedName
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+
+  const acronym = words.map((word) => word[0]).join("");
+  if (acronym.length >= 2) {
+    return acronym.slice(0, 8);
+  }
+
+  return compact.slice(0, 8);
+}
+
+function createDeployFixedSupplyTokenTool({
+  launchOrchestrator,
+  deploymentService,
+  emitActions,
+  walletAddress,
+}) {
   return tool(
     async (input) => {
-      const targetOwner =
-        input.finalOwnerAddress || input.ownerAddress || input.adminAddress;
-      const finalOwnerAddress = normalizeAddress(targetOwner, "finalOwnerAddress");
+      const connectedWalletAddress = normalizeAddress(walletAddress, "walletAddress");
+      const finalOwnerAddress = connectedWalletAddress;
 
       const tokenName = input.name.trim();
-      const tokenSymbol = input.symbol.trim();
+      const tokenSymbol =
+        typeof input.symbol === "string" && input.symbol.trim()
+          ? input.symbol.trim().toUpperCase()
+          : deriveSymbolFromName(tokenName);
       const launchResult = launchOrchestrator
         ? await launchOrchestrator.deployAndPersistLaunch({
             name: tokenName,
@@ -62,10 +91,10 @@ function createDeployFixedSupplyTokenTool({ launchOrchestrator, deploymentServic
     {
       name: "deploy_fixed_supply_token",
       description:
-        "Deploy a fixed-supply ERC20 token and transfer token supply and ownership to final owner. Use for requests to create/deploy new token.",
+        "Deploy a fixed-supply ERC20 token. Use connected wallet as final owner/admin and auto-derive symbol from token name if not provided.",
       schema: z.object({
         name: z.string().min(1),
-        symbol: z.string().min(1),
+        symbol: z.string().min(1).optional(),
         finalOwnerAddress: z.string().optional(),
         ownerAddress: z.string().optional(),
         adminAddress: z.string().optional(),
@@ -76,4 +105,5 @@ function createDeployFixedSupplyTokenTool({ launchOrchestrator, deploymentServic
 
 module.exports = {
   createDeployFixedSupplyTokenTool,
+  deriveSymbolFromName,
 };
