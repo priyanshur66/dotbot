@@ -21,8 +21,10 @@ describe("env validation", () => {
 
     expect(result.port).toBe(3000);
     expect(result.rpcUrl).toBe("http://localhost:8545");
+    expect(result.rpcWriteUrl).toBe("http://localhost:8545");
     expect(result.envStatus).toEqual({
       rpcUrlConfigured: true,
+      rpcWriteUrlConfigured: false,
       backendPrivateKeyConfigured: true,
       convexUrlConfigured: true,
     });

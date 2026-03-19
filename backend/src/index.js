@@ -36,6 +36,7 @@ async function start() {
 
   const deploymentService = createTokenDeploymentService({
     rpcUrl: config.rpcUrl,
+    rpcWriteUrl: config.rpcWriteUrl,
     backendPrivateKey: config.backendPrivateKey,
     logger: createLogger({
       service: "backend.deployment",

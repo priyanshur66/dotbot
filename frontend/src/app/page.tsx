@@ -43,6 +43,7 @@ type HealthResponse = {
   backendCandidates?: string[];
   env?: {
     rpcUrlConfigured: boolean;
+    rpcWriteUrlConfigured?: boolean;
     backendPrivateKeyConfigured: boolean;
     convexUrlConfigured?: boolean;
   };
@@ -292,6 +293,16 @@ export default function Home() {
                     : health.env.rpcUrlConfigured
                       ? "Configured"
                       : "Missing"}
+                </span>
+              </p>
+              <p className="flex justify-between gap-4">
+                <span>RPC Write URL</span>
+                <span className="font-semibold text-slate-800">
+                  {!health?.env
+                    ? "Unknown"
+                    : health.env.rpcWriteUrlConfigured
+                      ? "Configured"
+                      : "Using RPC URL"}
                 </span>
               </p>
               <p className="flex justify-between gap-4">

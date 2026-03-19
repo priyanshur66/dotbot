@@ -9,6 +9,7 @@ const {
 function getEnvStatus(env = process.env) {
   return {
     rpcUrlConfigured: Boolean(env.RPC_URL),
+    rpcWriteUrlConfigured: Boolean(env.RPC_WRITE_URL),
     backendPrivateKeyConfigured: Boolean(env.BACKEND_PRIVATE_KEY),
     convexUrlConfigured: Boolean(env.CONVEX_URL),
   };
@@ -78,6 +79,7 @@ function validateAndLoadEnv(env = process.env, options = { strict: true }) {
 
   return {
     rpcUrl: env.RPC_URL || "",
+    rpcWriteUrl: env.RPC_WRITE_URL || env.RPC_URL || "",
     backendPrivateKey: env.BACKEND_PRIVATE_KEY || "",
     convexUrl: env.CONVEX_URL || "",
     port: Number(env.PORT || 3000),

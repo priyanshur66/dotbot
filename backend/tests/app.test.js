@@ -16,6 +16,7 @@ function makeTestApp(overrides = {}) {
     tokenRegistryService,
     envStatus: {
       rpcUrlConfigured: true,
+      rpcWriteUrlConfigured: true,
       backendPrivateKeyConfigured: true,
       convexUrlConfigured: true,
     },
@@ -34,6 +35,7 @@ describe("API", () => {
       status: "ok",
       env: {
         rpcUrlConfigured: true,
+        rpcWriteUrlConfigured: true,
         backendPrivateKeyConfigured: true,
         convexUrlConfigured: true,
       },

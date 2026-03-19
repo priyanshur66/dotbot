@@ -80,6 +80,7 @@ function createApp({ deploymentService, tokenRegistryService, envStatus, logger 
       status: "ok",
       env: {
         rpcUrlConfigured: envStatus?.rpcUrlConfigured ?? false,
+        rpcWriteUrlConfigured: envStatus?.rpcWriteUrlConfigured ?? false,
         backendPrivateKeyConfigured:
           envStatus?.backendPrivateKeyConfigured ?? false,
         convexUrlConfigured: envStatus?.convexUrlConfigured ?? false,
