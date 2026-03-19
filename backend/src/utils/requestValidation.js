@@ -1,27 +1,65 @@
 const { getAddress } = require("ethers");
 const { ValidationError } = require("../lib/errors");
+const {
+  createLogger,
+  getLogConfigFromEnv,
+  sanitizeForLogging,
+} = require("../lib/logging");
+
+const validationLogger = createLogger({
+  service: "backend.validation",
+  ...getLogConfigFromEnv(process.env),
+});
 
 function normalizeDeployRequest(body) {
+  const startedAt = Date.now();
+  const operation = "validation.normalizeDeployRequest";
+  validationLogger.info({
+    operation,
+    stage: "start",
+    status: "start",
+    context: {
+      body: sanitizeForLogging(body),
+    },
+  });
+
+  function fail(message, stage, context = {}) {
+    const validationError = new ValidationError(message);
+    validationError.operation = operation;
+    validationError.stage = stage;
+    validationLogger.warn({
+      operation,
+      stage,
+      status: "failure",
+      durationMs: Date.now() - startedAt,
+      context,
+    });
+    throw validationError;
+  }
+
   if (!body || typeof body !== "object") {
-    throw new ValidationError("Request body is required");
+    fail("Request body is required", "validate.body", {
+      bodyType: typeof body,
+    });
   }
 
   const name = typeof body.name === "string" ? body.name.trim() : "";
   const symbol = typeof body.symbol === "string" ? body.symbol.trim() : "";
 
   if (!name) {
-    throw new ValidationError("Field `name` is required");
+    fail("Field `name` is required", "validate.name");
   }
   if (!symbol) {
-    throw new ValidationError("Field `symbol` is required");
+    fail("Field `symbol` is required", "validate.symbol");
   }
 
   const ownerAddressRaw = body.ownerAddress;
   const adminAddressRaw = body.adminAddress;
 
   if (!ownerAddressRaw && !adminAddressRaw) {
-    throw new ValidationError(
-      "Either `ownerAddress` or `adminAddress` must be provided"
+    fail(
+      "Either `ownerAddress` or `adminAddress` must be provided",
+      "validate.ownerOrAdminRequired"
     );
   }
 
@@ -31,22 +69,42 @@ function normalizeDeployRequest(body) {
   try {
     ownerAddress = ownerAddressRaw ? getAddress(ownerAddressRaw) : undefined;
   } catch (_error) {
-    throw new ValidationError("`ownerAddress` is not a valid Ethereum address");
+    fail("`ownerAddress` is not a valid Ethereum address", "validate.ownerAddress", {
+      ownerAddressRaw,
+    });
   }
 
   try {
     adminAddress = adminAddressRaw ? getAddress(adminAddressRaw) : undefined;
   } catch (_error) {
-    throw new ValidationError("`adminAddress` is not a valid Ethereum address");
+    fail("`adminAddress` is not a valid Ethereum address", "validate.adminAddress", {
+      adminAddressRaw,
+    });
   }
 
   if (ownerAddress && adminAddress && ownerAddress !== adminAddress) {
-    throw new ValidationError(
-      "`ownerAddress` and `adminAddress` must match when both are provided"
+    fail(
+      "`ownerAddress` and `adminAddress` must match when both are provided",
+      "validate.ownerAdminMatch",
+      {
+        ownerAddress,
+        adminAddress,
+      }
     );
   }
 
   const finalOwnerAddress = ownerAddress || adminAddress;
+  validationLogger.info({
+    operation,
+    stage: "success",
+    status: "success",
+    durationMs: Date.now() - startedAt,
+    context: {
+      name,
+      symbol,
+      finalOwnerAddress,
+    },
+  });
   return {
     name,
     symbol,
