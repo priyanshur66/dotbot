@@ -2,7 +2,7 @@ const express = require("express");
 const { HttpError } = require("./lib/errors");
 const { normalizeDeployRequest } = require("./utils/requestValidation");
 
-function createApp({ deploymentService, envStatus }) {
+function createApp({ deploymentService, tokenRegistryService, envStatus }) {
   const app = express();
   app.use(express.json());
 
@@ -13,6 +13,7 @@ function createApp({ deploymentService, envStatus }) {
         rpcUrlConfigured: envStatus?.rpcUrlConfigured ?? false,
         backendPrivateKeyConfigured:
           envStatus?.backendPrivateKeyConfigured ?? false,
+        convexUrlConfigured: envStatus?.convexUrlConfigured ?? false,
       },
     });
   });
@@ -20,12 +21,59 @@ function createApp({ deploymentService, envStatus }) {
   app.post("/api/tokens/deploy", async (req, res, next) => {
     try {
       const { name, symbol, finalOwnerAddress } = normalizeDeployRequest(req.body);
-      const result = await deploymentService.deployToken({
+      const deployed = await deploymentService.deployToken({
         name,
         symbol,
         finalOwnerAddress,
       });
-      res.status(201).json(result);
+
+      const launchRecord = await tokenRegistryService.createLaunchRecord({
+        tokenAddress: deployed.tokenAddress,
+        tokenName: name,
+        tokenSymbol: symbol,
+        ownerAddress: deployed.ownerAddress,
+        launchedByAddress: deployed.launchedByAddress,
+        chainId: deployed.network?.chainId,
+        networkName: deployed.network?.name,
+        totalSupply: deployed.totalSupply,
+        decimals: deployed.decimals,
+        launchStatus: "completed",
+        deployTxHash: deployed.transactions.deploy,
+        tokenTransferTxHash: deployed.transactions.tokenTransfer,
+        ownershipTransferTxHash: deployed.transactions.ownershipTransfer,
+      });
+
+      res.status(201).json({
+        ...deployed,
+        launchRecordId: launchRecord.id,
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/tokens/launched", async (_req, res, next) => {
+    try {
+      const tokens = await tokenRegistryService.listAllTokenLaunches();
+      res.json({
+        count: tokens.length,
+        tokens,
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/tokens/by-owner/:ownerAddress", async (req, res, next) => {
+    try {
+      const tokens = await tokenRegistryService.listTokenLaunchesByOwner(
+        req.params.ownerAddress
+      );
+      res.json({
+        ownerAddress: req.params.ownerAddress,
+        count: tokens.length,
+        tokens,
+      });
     } catch (error) {
       next(error);
     }

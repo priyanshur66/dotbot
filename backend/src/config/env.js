@@ -5,6 +5,7 @@ function getEnvStatus(env = process.env) {
   return {
     rpcUrlConfigured: Boolean(env.RPC_URL),
     backendPrivateKeyConfigured: Boolean(env.BACKEND_PRIVATE_KEY),
+    convexUrlConfigured: Boolean(env.CONVEX_URL),
   };
 }
 
@@ -27,6 +28,9 @@ function validateAndLoadEnv(env = process.env, options = { strict: true }) {
       errors.push("BACKEND_PRIVATE_KEY is invalid");
     }
   }
+  if (!env.CONVEX_URL) {
+    errors.push("CONVEX_URL is required");
+  }
 
   if (options.strict && errors.length > 0) {
     throw new ConfigError("Invalid environment configuration", { errors });
@@ -35,6 +39,7 @@ function validateAndLoadEnv(env = process.env, options = { strict: true }) {
   return {
     rpcUrl: env.RPC_URL || "",
     backendPrivateKey: env.BACKEND_PRIVATE_KEY || "",
+    convexUrl: env.CONVEX_URL || "",
     port: Number(env.PORT || 3000),
     envStatus: status,
   };

@@ -85,6 +85,7 @@ function createTokenDeploymentService({
       return {
         tokenAddress,
         ownerAddress: finalOwnerAddress,
+        launchedByAddress: wallet.address,
         network,
         decimals: TOKEN_DECIMALS,
         totalSupply: TOKEN_SUPPLY,
@@ -94,6 +95,7 @@ function createTokenDeploymentService({
       const details = {
         tokenAddress: tokenAddress || null,
         ownerAddress: finalOwnerAddress,
+        launchedByAddress: wallet.address,
         network: network || null,
         decimals: TOKEN_DECIMALS,
         totalSupply: TOKEN_SUPPLY,
@@ -117,6 +119,7 @@ function createTokenDeploymentService({
   return {
     init,
     getNetwork,
+    getDeployerAddress: () => wallet.address,
     deployToken,
   };
 }

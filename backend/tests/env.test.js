@@ -14,6 +14,7 @@ describe("env validation", () => {
         RPC_URL: "http://localhost:8545",
         BACKEND_PRIVATE_KEY:
           "0x59c6995e998f97a5a0044966f0945382d5f6c6dbe8ec44f6f4eb6ac7b5f4b531",
+        CONVEX_URL: "https://example.convex.cloud",
       },
       { strict: true }
     );
@@ -23,6 +24,7 @@ describe("env validation", () => {
     expect(result.envStatus).toEqual({
       rpcUrlConfigured: true,
       backendPrivateKeyConfigured: true,
+      convexUrlConfigured: true,
     });
   });
 });

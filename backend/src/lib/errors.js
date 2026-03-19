@@ -33,10 +33,18 @@ class OnChainError extends HttpError {
   }
 }
 
+class DataStoreError extends HttpError {
+  constructor(message, details, cause) {
+    super(message, 500, "TOKEN_REGISTRY_WRITE_FAILED", details);
+    this.cause = cause;
+  }
+}
+
 module.exports = {
   HttpError,
   ValidationError,
   ConfigError,
   CompileError,
   OnChainError,
+  DataStoreError,
 };

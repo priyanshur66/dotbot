@@ -3,6 +3,7 @@ require("dotenv").config();
 const { createApp } = require("./app");
 const { validateAndLoadEnv } = require("./config/env");
 const { createTokenDeploymentService } = require("./services/tokenDeploymentService");
+const { createTokenRegistryService } = require("./services/tokenRegistryService");
 
 async function start() {
   const config = validateAndLoadEnv(process.env, { strict: true });
@@ -11,11 +12,15 @@ async function start() {
     rpcUrl: config.rpcUrl,
     backendPrivateKey: config.backendPrivateKey,
   });
+  const tokenRegistryService = createTokenRegistryService({
+    convexUrl: config.convexUrl,
+  });
 
   await deploymentService.init();
 
   const app = createApp({
     deploymentService,
+    tokenRegistryService,
     envStatus: config.envStatus,
   });
 

@@ -5,17 +5,24 @@ function makeTestApp(overrides = {}) {
   const deploymentService = {
     deployToken: jest.fn(),
   };
+  const tokenRegistryService = {
+    createLaunchRecord: jest.fn(),
+    listAllTokenLaunches: jest.fn(),
+    listTokenLaunchesByOwner: jest.fn(),
+  };
 
   const app = createApp({
     deploymentService,
+    tokenRegistryService,
     envStatus: {
       rpcUrlConfigured: true,
       backendPrivateKeyConfigured: true,
+      convexUrlConfigured: true,
     },
     ...overrides,
   });
 
-  return { app, deploymentService };
+  return { app, deploymentService, tokenRegistryService };
 }
 
 describe("API", () => {
@@ -28,6 +35,7 @@ describe("API", () => {
       env: {
         rpcUrlConfigured: true,
         backendPrivateKeyConfigured: true,
+        convexUrlConfigured: true,
       },
     });
   });
@@ -86,10 +94,11 @@ describe("API", () => {
   });
 
   test("POST /api/tokens/deploy happy path shape", async () => {
-    const { app, deploymentService } = makeTestApp();
+    const { app, deploymentService, tokenRegistryService } = makeTestApp();
     deploymentService.deployToken.mockResolvedValue({
       tokenAddress: "0x3333333333333333333333333333333333333333",
       ownerAddress: "0x1111111111111111111111111111111111111111",
+      launchedByAddress: "0x9999999999999999999999999999999999999999",
       network: {
         chainId: 8453,
         name: "base",
@@ -101,6 +110,9 @@ describe("API", () => {
         tokenTransfer: "0xtransfer",
         ownershipTransfer: "0xownership",
       },
+    });
+    tokenRegistryService.createLaunchRecord.mockResolvedValue({
+      id: "convex-record-id",
     });
 
     const response = await request(app).post("/api/tokens/deploy").send({
@@ -113,6 +125,7 @@ describe("API", () => {
     expect(response.body).toEqual({
       tokenAddress: "0x3333333333333333333333333333333333333333",
       ownerAddress: "0x1111111111111111111111111111111111111111",
+      launchedByAddress: "0x9999999999999999999999999999999999999999",
       network: {
         chainId: 8453,
         name: "base",
@@ -124,6 +137,7 @@ describe("API", () => {
         tokenTransfer: "0xtransfer",
         ownershipTransfer: "0xownership",
       },
+      launchRecordId: "convex-record-id",
     });
     expect(deploymentService.deployToken).toHaveBeenCalledTimes(1);
     expect(deploymentService.deployToken).toHaveBeenCalledWith({
@@ -131,5 +145,75 @@ describe("API", () => {
       symbol: "MTK",
       finalOwnerAddress: "0x1111111111111111111111111111111111111111",
     });
+    expect(tokenRegistryService.createLaunchRecord).toHaveBeenCalledWith({
+      tokenAddress: "0x3333333333333333333333333333333333333333",
+      tokenName: "My Token",
+      tokenSymbol: "MTK",
+      ownerAddress: "0x1111111111111111111111111111111111111111",
+      launchedByAddress: "0x9999999999999999999999999999999999999999",
+      chainId: 8453,
+      networkName: "base",
+      totalSupply: "1000000000",
+      decimals: 18,
+      launchStatus: "completed",
+      deployTxHash: "0xdeploy",
+      tokenTransferTxHash: "0xtransfer",
+      ownershipTransferTxHash: "0xownership",
+    });
+  });
+
+  test("GET /api/tokens/launched returns stored launch records", async () => {
+    const { app, tokenRegistryService } = makeTestApp();
+    tokenRegistryService.listAllTokenLaunches.mockResolvedValue([
+      {
+        id: "1",
+        tokenAddress: "0x3333333333333333333333333333333333333333",
+        ownerAddress: "0x1111111111111111111111111111111111111111",
+      },
+    ]);
+
+    const response = await request(app).get("/api/tokens/launched");
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toEqual({
+      count: 1,
+      tokens: [
+        {
+          id: "1",
+          tokenAddress: "0x3333333333333333333333333333333333333333",
+          ownerAddress: "0x1111111111111111111111111111111111111111",
+        },
+      ],
+    });
+  });
+
+  test("GET /api/tokens/by-owner/:ownerAddress returns filtered records", async () => {
+    const { app, tokenRegistryService } = makeTestApp();
+    tokenRegistryService.listTokenLaunchesByOwner.mockResolvedValue([
+      {
+        id: "1",
+        tokenAddress: "0x3333333333333333333333333333333333333333",
+        ownerAddress: "0x1111111111111111111111111111111111111111",
+      },
+    ]);
+
+    const response = await request(app).get(
+      "/api/tokens/by-owner/0x1111111111111111111111111111111111111111"
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toEqual({
+      ownerAddress: "0x1111111111111111111111111111111111111111",
+      count: 1,
+      tokens: [
+        {
+          id: "1",
+          tokenAddress: "0x3333333333333333333333333333333333333333",
+          ownerAddress: "0x1111111111111111111111111111111111111111",
+        },
+      ],
+    });
+    expect(tokenRegistryService.listTokenLaunchesByOwner).toHaveBeenCalledWith(
+      "0x1111111111111111111111111111111111111111"
+    );
   });
 });
