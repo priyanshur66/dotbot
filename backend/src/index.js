@@ -4,7 +4,11 @@ const { createApp } = require("./app");
 const { validateAndLoadEnv } = require("./config/env");
 const { createTokenDeploymentService } = require("./services/tokenDeploymentService");
 const { createTokenRegistryService } = require("./services/tokenRegistryService");
+const { createTokenLaunchOrchestrator } = require("./services/tokenLaunchOrchestrator");
+const { createChatHistoryService } = require("./services/chatHistoryService");
+const { createAgentService } = require("./agent");
 const { createLogger, getLogConfigFromEnv, sanitizeForLogging } = require("./lib/logging");
+const { ConfigError } = require("./lib/errors");
 
 const bootstrapLogConfig = getLogConfigFromEnv(process.env);
 const bootstrapLogger = createLogger({
@@ -52,6 +56,39 @@ async function start() {
       verbose: config.logConfig.verbose,
     }),
   });
+  const launchOrchestrator = createTokenLaunchOrchestrator({
+    deploymentService,
+    tokenRegistryService,
+    logger: createLogger({
+      service: "backend.launchOrchestrator",
+      level: config.logConfig.level,
+      verbose: config.logConfig.verbose,
+    }),
+  });
+  const chatHistoryService = createChatHistoryService({
+    convexUrl: config.convexUrl,
+    logger: createLogger({
+      service: "backend.chatHistory",
+      level: config.logConfig.level,
+      verbose: config.logConfig.verbose,
+    }),
+  });
+  const agentService = createAgentService({
+    rpcUrl: config.rpcUrl,
+    rpcWriteUrl: config.rpcWriteUrl,
+    backendPrivateKey: config.backendPrivateKey,
+    openRouterApiKey: config.openRouterApiKey,
+    openRouterModel: config.openRouterModel,
+    openRouterSiteUrl: config.openRouterSiteUrl,
+    openRouterSiteName: config.openRouterSiteName,
+    deploymentService,
+    launchOrchestrator,
+    logger: createLogger({
+      service: "backend.agent",
+      level: config.logConfig.level,
+      verbose: config.logConfig.verbose,
+    }),
+  });
 
   rootLogger.info({
     operation: "backend.startup",
@@ -65,9 +102,21 @@ async function start() {
     status: "success",
   });
 
+  const connectedNetwork = await agentService.getNetworkInfo();
+  if (Number(connectedNetwork.chainId) !== Number(agentService.expectedChainId)) {
+    throw new ConfigError("Agent backend must be connected to Polkadot Hub TestNet RPC", {
+      expectedChainId: Number(agentService.expectedChainId),
+      connectedChainId: Number(connectedNetwork.chainId),
+      connectedNetworkName: connectedNetwork.name,
+    });
+  }
+
   const app = createApp({
     deploymentService,
     tokenRegistryService,
+    launchOrchestrator,
+    chatHistoryService,
+    agentService,
     envStatus: config.envStatus,
     logger: createLogger({
       service: "backend.http",

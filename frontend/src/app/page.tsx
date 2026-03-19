@@ -172,6 +172,12 @@ export default function Home() {
             >
               View Launches
             </Link>
+            <Link
+              href="/chat"
+              className="rounded-full border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+            >
+              Open Chat
+            </Link>
           </div>
         </div>
       </section>

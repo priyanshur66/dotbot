@@ -40,6 +40,26 @@ class DataStoreError extends HttpError {
   }
 }
 
+class AgentBadRequestError extends HttpError {
+  constructor(message, details) {
+    super(message, 400, "AGENT_BAD_REQUEST", details);
+  }
+}
+
+class AgentToolExecutionError extends HttpError {
+  constructor(message, details, cause) {
+    super(message, 502, "AGENT_TOOL_EXECUTION_FAILED", details);
+    this.cause = cause;
+  }
+}
+
+class AgentModelError extends HttpError {
+  constructor(message, details, cause) {
+    super(message, 502, "AGENT_MODEL_FAILED", details);
+    this.cause = cause;
+  }
+}
+
 module.exports = {
   HttpError,
   ValidationError,
@@ -47,4 +67,7 @@ module.exports = {
   CompileError,
   OnChainError,
   DataStoreError,
+  AgentBadRequestError,
+  AgentToolExecutionError,
+  AgentModelError,
 };

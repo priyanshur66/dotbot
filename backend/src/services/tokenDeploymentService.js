@@ -6,7 +6,13 @@ const { createNoopLogger } = require("../lib/logging");
 const TOKEN_DECIMALS = 18;
 const TOKEN_SUPPLY = "1000000000";
 const DEFAULT_DEPLOY_MAX_ATTEMPTS = 3;
-const DEFAULT_PRIORITY_BUMP_WEI = 1_000_000_000n;
+const DEFAULT_PRIORITY_BUMP_WEI = 5_000_000_000n;
+const DEFAULT_MIN_PRIORITY_FEE_WEI = 5_000_000_000n;
+const DEFAULT_MIN_MAX_FEE_WEI = 25_000_000_000n;
+const DEFAULT_CODE_READY_MAX_ATTEMPTS = 20;
+const DEFAULT_CODE_READY_POLL_MS = 500;
+const DEFAULT_HANDOFF_MAX_ATTEMPTS = 3;
+const DEFAULT_HANDOFF_BACKOFF_MS = 700;
 
 function toNetworkInfo(network) {
   return {
@@ -33,6 +39,19 @@ function parsePositiveBigInt(value, fallback) {
   } catch (_error) {
     return fallback;
   }
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+function computeFixedSupplyAmount(ethersLib) {
+  if (typeof ethersLib.parseUnits === "function") {
+    return ethersLib.parseUnits(TOKEN_SUPPLY, TOKEN_DECIMALS);
+  }
+  return BigInt(TOKEN_SUPPLY) * 10n ** BigInt(TOKEN_DECIMALS);
 }
 
 function toLogSafe(value) {
@@ -150,6 +169,30 @@ function createTokenDeploymentService({
   const priorityBumpWei = parsePositiveBigInt(
     process.env.DEPLOY_TX_PRIORITY_BUMP_WEI,
     DEFAULT_PRIORITY_BUMP_WEI
+  );
+  const minPriorityFeeWei = parsePositiveBigInt(
+    process.env.DEPLOY_TX_MIN_PRIORITY_FEE_WEI,
+    DEFAULT_MIN_PRIORITY_FEE_WEI
+  );
+  const minMaxFeeWei = parsePositiveBigInt(
+    process.env.DEPLOY_TX_MIN_MAX_FEE_WEI,
+    DEFAULT_MIN_MAX_FEE_WEI
+  );
+  const codeReadyMaxAttempts = parsePositiveInt(
+    process.env.DEPLOY_CODE_READY_MAX_ATTEMPTS,
+    DEFAULT_CODE_READY_MAX_ATTEMPTS
+  );
+  const codeReadyPollMs = parsePositiveInt(
+    process.env.DEPLOY_CODE_READY_POLL_MS,
+    DEFAULT_CODE_READY_POLL_MS
+  );
+  const handoffMaxAttempts = parsePositiveInt(
+    process.env.DEPLOY_HANDOFF_MAX_ATTEMPTS,
+    DEFAULT_HANDOFF_MAX_ATTEMPTS
+  );
+  const handoffBackoffMs = parsePositiveInt(
+    process.env.DEPLOY_HANDOFF_BACKOFF_MS,
+    DEFAULT_HANDOFF_BACKOFF_MS
   );
 
   let compiledArtifactPromise;
@@ -270,12 +313,25 @@ function createTokenDeploymentService({
       };
 
       if (feeData.maxFeePerGas !== null || feeData.maxPriorityFeePerGas !== null) {
-        const baseMaxFee = feeData.maxFeePerGas ?? feeData.gasPrice ?? 0n;
-        const basePriority = feeData.maxPriorityFeePerGas ?? 0n;
-        overrides.maxFeePerGas = baseMaxFee + bump;
+        const observedMaxFee = feeData.maxFeePerGas ?? feeData.gasPrice ?? 0n;
+        const observedPriority = feeData.maxPriorityFeePerGas ?? 0n;
+        const basePriority =
+          observedPriority > minPriorityFeeWei ? observedPriority : minPriorityFeeWei;
+        const baseMaxFeeCandidate = observedMaxFee > minMaxFeeWei ? observedMaxFee : minMaxFeeWei;
+        const baseMaxFee =
+          baseMaxFeeCandidate > basePriority * 2n
+            ? baseMaxFeeCandidate
+            : basePriority * 2n;
+
         overrides.maxPriorityFeePerGas = basePriority + bump;
+        overrides.maxFeePerGas = baseMaxFee + bump * 2n;
       } else if (feeData.gasPrice !== null) {
-        overrides.gasPrice = feeData.gasPrice + bump;
+        const baseGasPrice =
+          feeData.gasPrice > minMaxFeeWei ? feeData.gasPrice : minMaxFeeWei;
+        overrides.gasPrice = baseGasPrice + bump;
+      } else {
+        overrides.maxPriorityFeePerGas = minPriorityFeeWei + bump;
+        overrides.maxFeePerGas = minMaxFeeWei + bump * 2n;
       }
 
       return overrides;
@@ -334,8 +390,7 @@ function createTokenDeploymentService({
 
       for (let attemptNumber = 1; attemptNumber <= deployMaxAttempts; attemptNumber += 1) {
         const attemptStartedAt = Date.now();
-        const deployOverrides =
-          attemptNumber === 1 ? undefined : await buildDeployOverrides(attemptNumber);
+        const deployOverrides = await buildDeployOverrides(attemptNumber);
         deployAttempt = attemptNumber;
 
         serviceLogger.info({
@@ -350,9 +405,7 @@ function createTokenDeploymentService({
         });
 
         try {
-          contract = deployOverrides
-            ? await factory.deploy(name, symbol, deployOverrides)
-            : await factory.deploy(name, symbol);
+          contract = await factory.deploy(name, symbol, deployOverrides);
           serviceLogger.info({
             operation,
             stage: "contractDeploy.attempt",
@@ -422,23 +475,127 @@ function createTokenDeploymentService({
         },
       });
 
+      stage = "waitForCodeReady";
+      serviceLogger.info({
+        operation,
+        stage,
+        status: "start",
+        context: {
+          tokenAddress,
+          codeReadyMaxAttempts,
+          codeReadyPollMs,
+        },
+      });
+      let codeReady = false;
+      for (let attemptNumber = 1; attemptNumber <= codeReadyMaxAttempts; attemptNumber += 1) {
+        stage = "waitForCodeReady.poll";
+        const code = await provider.getCode(tokenAddress);
+        if (code && code !== "0x") {
+          codeReady = true;
+          serviceLogger.info({
+            operation,
+            stage,
+            status: "success",
+            context: {
+              tokenAddress,
+              attemptNumber,
+            },
+          });
+          break;
+        }
+
+        if (attemptNumber < codeReadyMaxAttempts) {
+          await sleep(codeReadyPollMs);
+        }
+      }
+      if (!codeReady) {
+        throw new Error("Contract code not ready after deployment");
+      }
+
+      const fullSupplyAmount = computeFixedSupplyAmount(ethersLib);
+
+      async function executePostDeployStep({
+        stepName,
+        transactionKey,
+        execute,
+        logContext,
+      }) {
+        let lastError;
+        for (let attemptNumber = 1; attemptNumber <= handoffMaxAttempts; attemptNumber += 1) {
+          stage = `${stepName}.attempt`;
+          const attemptStartedAt = Date.now();
+          const reboundContract = new ethersLib.Contract(tokenAddress, artifact.abi, wallet);
+
+          serviceLogger.info({
+            operation,
+            stage,
+            status: "start",
+            context: {
+              attemptNumber,
+              handoffMaxAttempts,
+              tokenAddress,
+            },
+          });
+
+          try {
+            const tx = await execute(reboundContract);
+            transactions[transactionKey] = tx?.hash || null;
+            await tx.wait();
+
+            stage = stepName;
+            serviceLogger.info({
+              operation,
+              stage,
+              status: "success",
+              durationMs: Date.now() - attemptStartedAt,
+              context: {
+                attemptNumber,
+                txHash: transactions[transactionKey],
+                ...(logContext || {}),
+              },
+            });
+            return;
+          } catch (attemptError) {
+            lastError = attemptError;
+            const retryable = attemptNumber < handoffMaxAttempts;
+
+            serviceLogger[retryable ? "warn" : "error"]({
+              operation,
+              stage,
+              status: "failure",
+              durationMs: Date.now() - attemptStartedAt,
+              error: attemptError,
+              context: {
+                attemptNumber,
+                handoffMaxAttempts,
+                retryable,
+                tokenAddress,
+              },
+            });
+
+            if (!retryable) {
+              throw attemptError;
+            }
+
+            await sleep(handoffBackoffMs * attemptNumber);
+          }
+        }
+
+        throw lastError;
+      }
+
       stage = "transferTokens";
       serviceLogger.info({
         operation,
         stage,
         status: "start",
       });
-      const currentBalance = await contract.balanceOf(wallet.address);
-      const transferTx = await contract.transfer(finalOwnerAddress, currentBalance);
-      transactions.tokenTransfer = transferTx.hash;
-      await transferTx.wait();
-      serviceLogger.info({
-        operation,
-        stage,
-        status: "success",
-        context: {
-          transferTxHash: transactions.tokenTransfer,
-          transferAmount: currentBalance.toString(),
+      await executePostDeployStep({
+        stepName: "transferTokens",
+        transactionKey: "tokenTransfer",
+        execute: (reboundContract) => reboundContract.transfer(finalOwnerAddress, fullSupplyAmount),
+        logContext: {
+          transferAmount: fullSupplyAmount.toString(),
         },
       });
 
@@ -448,16 +605,10 @@ function createTokenDeploymentService({
         stage,
         status: "start",
       });
-      const ownershipTx = await contract.transferOwnership(finalOwnerAddress);
-      transactions.ownershipTransfer = ownershipTx.hash;
-      await ownershipTx.wait();
-      serviceLogger.info({
-        operation,
-        stage,
-        status: "success",
-        context: {
-          ownershipTxHash: transactions.ownershipTransfer,
-        },
+      await executePostDeployStep({
+        stepName: "transferOwnership",
+        transactionKey: "ownershipTransfer",
+        execute: (reboundContract) => reboundContract.transferOwnership(finalOwnerAddress),
       });
 
       const result = {

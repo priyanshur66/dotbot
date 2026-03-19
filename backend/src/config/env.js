@@ -50,7 +50,6 @@ function validateAndLoadEnv(env = process.env, options = { strict: true }) {
   if (!env.CONVEX_URL) {
     errors.push("CONVEX_URL is required");
   }
-
   if (options.strict && errors.length > 0) {
     logger.error({
       operation: "config.env.validate",
@@ -82,6 +81,10 @@ function validateAndLoadEnv(env = process.env, options = { strict: true }) {
     rpcWriteUrl: env.RPC_WRITE_URL || env.RPC_URL || "",
     backendPrivateKey: env.BACKEND_PRIVATE_KEY || "",
     convexUrl: env.CONVEX_URL || "",
+    openRouterApiKey: env.OPENROUTER_API_KEY || "",
+    openRouterModel: env.OPENROUTER_MODEL || "openai/gpt-4.1-mini",
+    openRouterSiteUrl: env.OPENROUTER_SITE_URL || "",
+    openRouterSiteName: env.OPENROUTER_SITE_NAME || "",
     port: Number(env.PORT || 3000),
     envStatus: status,
     logConfig,
