@@ -3,6 +3,9 @@ const { randomUUID } = require("crypto");
 const { HttpError } = require("./lib/errors");
 const {
   normalizeDeployRequest,
+  normalizeLaunchRequest,
+  normalizeTokenAddress,
+  normalizeCandleInterval,
   normalizeAgentChatRequest,
   normalizeChatThreadCreateRequest,
   normalizeChatThreadListRequest,
@@ -44,9 +47,9 @@ function chunkText(input, chunkSize = 32) {
 }
 
 function createApp({
-  deploymentService,
   tokenRegistryService,
   launchOrchestrator,
+  eventIndexerService,
   chatHistoryService,
   agentService,
   envStatus,
@@ -112,14 +115,17 @@ function createApp({
         backendPrivateKeyConfigured:
           envStatus?.backendPrivateKeyConfigured ?? false,
         convexUrlConfigured: envStatus?.convexUrlConfigured ?? false,
+        launchpadAddressConfigured: envStatus?.launchpadAddressConfigured ?? false,
+        eventHubAddressConfigured: envStatus?.eventHubAddressConfigured ?? false,
+        quoteTokenAddressConfigured: envStatus?.quoteTokenAddressConfigured ?? false,
       },
     });
   });
 
-  app.post("/api/tokens/deploy", async (req, res, next) => {
+  async function handleTokenLaunch(req, res, next, routeOperation) {
     const startedAt = Date.now();
     appLogger.info({
-      operation: "api.tokens.deploy",
+      operation: routeOperation,
       stage: "start",
       status: "start",
       requestId: req.requestId,
@@ -130,91 +136,64 @@ function createApp({
 
     try {
       appLogger.info({
-        operation: "api.tokens.deploy",
+        operation: routeOperation,
         stage: "validate.request",
         status: "start",
       });
-      const { name, symbol, finalOwnerAddress } = normalizeDeployRequest(req.body);
+      const { name, symbol, creatorAddress } = normalizeLaunchRequest(req.body);
 
       appLogger.info({
-        operation: "api.tokens.deploy",
+        operation: routeOperation,
         stage: "validate.request",
         status: "success",
         context: {
           tokenName: name,
           tokenSymbol: symbol,
-          finalOwnerAddress,
+          creatorAddress,
         },
       });
 
       appLogger.info({
-        operation: "api.tokens.deploy",
-        stage: "deploy.onchain",
+        operation: routeOperation,
+        stage: "launch.onchain",
         status: "start",
       });
-      let deployed;
-      let launchRecordId = null;
-      let launchStatus = "completed";
+      const orchestrated = await launchOrchestrator.deployAndPersistLaunch({
+        name,
+        symbol,
+        creatorAddress,
+      });
+      const deployed = orchestrated.deployed;
+      const launchRecordId = orchestrated.launchRecordId;
+      const launchStatus = orchestrated.launchStatus || "completed";
 
-      if (
-        launchOrchestrator &&
-        typeof launchOrchestrator.deployAndPersistLaunch === "function"
-      ) {
-        const orchestrated = await launchOrchestrator.deployAndPersistLaunch({
-          name,
-          symbol,
-          finalOwnerAddress,
-        });
-        deployed = orchestrated.deployed;
-        launchRecordId = orchestrated.launchRecordId;
-        launchStatus = orchestrated.launchStatus || "completed";
-      } else {
-        deployed = await deploymentService.deployToken({
-          name,
-          symbol,
-          finalOwnerAddress,
-        });
-      }
       appLogger.info({
-        operation: "api.tokens.deploy",
-        stage: "deploy.onchain",
+        operation: routeOperation,
+        stage: "launch.onchain",
         status: "success",
         context: {
           tokenAddress: deployed.tokenAddress,
+          poolAddress: deployed.poolAddress,
           network: deployed.network,
           transactions: deployed.transactions,
         },
       });
 
-      if (!launchRecordId) {
+      if (
+        eventIndexerService &&
+        typeof eventIndexerService.syncOnce === "function"
+      ) {
         appLogger.info({
-          operation: "api.tokens.deploy",
-          stage: "registry.persist",
+          operation: routeOperation,
+          stage: "indexer.sync",
           status: "start",
         });
-        const launchRecord = await tokenRegistryService.createLaunchRecord({
-          tokenAddress: deployed.tokenAddress,
-          tokenName: name,
-          tokenSymbol: symbol,
-          ownerAddress: deployed.ownerAddress,
-          launchedByAddress: deployed.launchedByAddress,
-          chainId: deployed.network?.chainId,
-          networkName: deployed.network?.name,
-          totalSupply: deployed.totalSupply,
-          decimals: deployed.decimals,
-          launchStatus: "completed",
-          deployTxHash: deployed.transactions.deploy,
-          tokenTransferTxHash: deployed.transactions.tokenTransfer,
-          ownershipTransferTxHash: deployed.transactions.ownershipTransfer,
-        });
-        launchRecordId = launchRecord.id;
-        launchStatus = "completed";
+        await eventIndexerService.syncOnce();
         appLogger.info({
-          operation: "api.tokens.deploy",
-          stage: "registry.persist",
+          operation: routeOperation,
+          stage: "indexer.sync",
           status: "success",
           context: {
-            launchRecordId: launchRecord.id,
             tokenAddress: deployed.tokenAddress,
           },
         });
@@ -226,7 +205,7 @@ function createApp({
         launchStatus,
       });
       appLogger.info({
-        operation: "api.tokens.deploy",
+        operation: routeOperation,
         stage: "success",
         status: "success",
         durationMs: Date.now() - startedAt,
@@ -234,16 +213,17 @@ function createApp({
           launchRecordId,
           launchStatus,
           tokenAddress: deployed.tokenAddress,
-          ownerAddress: deployed.ownerAddress,
+          creatorAddress: deployed.ownerAddress,
         },
       });
+      return undefined;
     } catch (error) {
       attachErrorContext(error, {
-        operation: "api.tokens.deploy",
+        operation: routeOperation,
         stage: "handler",
       });
       appLogger.error({
-        operation: "api.tokens.deploy",
+        operation: routeOperation,
         stage: "failure",
         status: "failure",
         durationMs: Date.now() - startedAt,
@@ -252,8 +232,16 @@ function createApp({
           payload: sanitizeForLogging(req.body),
         },
       });
-      next(error);
+      return next(error);
     }
+  }
+
+  app.post("/api/tokens/launch", async (req, res, next) => {
+    return handleTokenLaunch(req, res, next, "api.tokens.launch");
+  });
+
+  app.post("/api/tokens/deploy", async (req, res, next) => {
+    return handleTokenLaunch(req, res, next, "api.tokens.deploy");
   });
 
   app.get("/api/tokens/launched", async (req, res, next) => {
@@ -339,6 +327,98 @@ function createApp({
         },
       });
       next(error);
+    }
+  });
+
+  app.get("/api/tokens/:tokenAddress/events", async (req, res, next) => {
+    const startedAt = Date.now();
+    const operation = "api.tokens.events.list";
+
+    try {
+      const tokenAddress = normalizeTokenAddress(req.params.tokenAddress);
+      const limit = Number(req.query.limit || 100);
+      const events = await tokenRegistryService.listTokenEvents(tokenAddress, limit);
+      return res.json({
+        tokenAddress,
+        count: events.length,
+        events,
+      });
+    } catch (error) {
+      attachErrorContext(error, { operation, stage: "handler" });
+      appLogger.error({
+        operation,
+        stage: "failure",
+        status: "failure",
+        durationMs: Date.now() - startedAt,
+        error,
+        context: {
+          tokenAddress: req.params.tokenAddress,
+          query: sanitizeForLogging(req.query),
+        },
+      });
+      return next(error);
+    }
+  });
+
+  app.get("/api/tokens/:tokenAddress/candles", async (req, res, next) => {
+    const startedAt = Date.now();
+    const operation = "api.tokens.candles.list";
+
+    try {
+      const tokenAddress = normalizeTokenAddress(req.params.tokenAddress);
+      const interval = normalizeCandleInterval(req.query.interval || "1h");
+      const candles = await tokenRegistryService.listTokenCandles(tokenAddress, interval);
+      return res.json({
+        tokenAddress,
+        interval,
+        count: candles.length,
+        candles,
+      });
+    } catch (error) {
+      attachErrorContext(error, { operation, stage: "handler" });
+      appLogger.error({
+        operation,
+        stage: "failure",
+        status: "failure",
+        durationMs: Date.now() - startedAt,
+        error,
+        context: {
+          tokenAddress: req.params.tokenAddress,
+          query: sanitizeForLogging(req.query),
+        },
+      });
+      return next(error);
+    }
+  });
+
+  app.get("/api/tokens/:tokenAddress", async (req, res, next) => {
+    const startedAt = Date.now();
+    const operation = "api.tokens.detail";
+
+    try {
+      const tokenAddress = normalizeTokenAddress(req.params.tokenAddress);
+      const token = await tokenRegistryService.getTokenLaunchByAddress(tokenAddress);
+      if (!token) {
+        throw new HttpError("Token launch not found", 404, "NOT_FOUND", {
+          tokenAddress,
+        });
+      }
+      return res.json({
+        token,
+      });
+    } catch (error) {
+      attachErrorContext(error, { operation, stage: "handler" });
+      appLogger.error({
+        operation,
+        stage: "failure",
+        status: "failure",
+        durationMs: Date.now() - startedAt,
+        error,
+        context: {
+          tokenAddress: req.params.tokenAddress,
+        },
+      });
+      return next(error);
     }
   });
 

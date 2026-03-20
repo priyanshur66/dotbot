@@ -2,9 +2,10 @@ require("dotenv").config();
 
 const { createApp } = require("./app");
 const { validateAndLoadEnv } = require("./config/env");
-const { createTokenDeploymentService } = require("./services/tokenDeploymentService");
 const { createTokenRegistryService } = require("./services/tokenRegistryService");
 const { createTokenLaunchOrchestrator } = require("./services/tokenLaunchOrchestrator");
+const { createLaunchpadDeploymentService } = require("./services/launchpadDeploymentService");
+const { createEventIndexerService } = require("./services/indexer/eventIndexerService");
 const { createChatHistoryService } = require("./services/chatHistoryService");
 const { createAgentService } = require("./agent");
 const { createLogger, getLogConfigFromEnv, sanitizeForLogging } = require("./lib/logging");
@@ -38,16 +39,6 @@ async function start() {
     verbose: config.logConfig.verbose,
   });
 
-  const deploymentService = createTokenDeploymentService({
-    rpcUrl: config.rpcUrl,
-    rpcWriteUrl: config.rpcWriteUrl,
-    backendPrivateKey: config.backendPrivateKey,
-    logger: createLogger({
-      service: "backend.deployment",
-      level: config.logConfig.level,
-      verbose: config.logConfig.verbose,
-    }),
-  });
   const tokenRegistryService = createTokenRegistryService({
     convexUrl: config.convexUrl,
     logger: createLogger({
@@ -56,11 +47,34 @@ async function start() {
       verbose: config.logConfig.verbose,
     }),
   });
+  const launchpadDeploymentService = createLaunchpadDeploymentService({
+    rpcUrl: config.rpcUrl,
+    rpcWriteUrl: config.rpcWriteUrl,
+    backendPrivateKey: config.backendPrivateKey,
+    protocolTreasuryAddress: config.protocolTreasuryAddress,
+    eventHubAddress: config.eventHubAddress,
+    quoteTokenAddress: config.quoteTokenAddress,
+    launchpadAddress: config.launchpadAddress,
+    logger: createLogger({
+      service: "backend.launchpad",
+      level: config.logConfig.level,
+      verbose: config.logConfig.verbose,
+    }),
+  });
   const launchOrchestrator = createTokenLaunchOrchestrator({
-    deploymentService,
+    launchpadDeploymentService,
     tokenRegistryService,
     logger: createLogger({
       service: "backend.launchOrchestrator",
+      level: config.logConfig.level,
+      verbose: config.logConfig.verbose,
+    }),
+  });
+  const eventIndexerService = createEventIndexerService({
+    launchpadDeploymentService,
+    tokenRegistryService,
+    logger: createLogger({
+      service: "backend.indexer",
       level: config.logConfig.level,
       verbose: config.logConfig.verbose,
     }),
@@ -81,7 +95,6 @@ async function start() {
     openRouterModel: config.openRouterModel,
     openRouterSiteUrl: config.openRouterSiteUrl,
     openRouterSiteName: config.openRouterSiteName,
-    deploymentService,
     launchOrchestrator,
     logger: createLogger({
       service: "backend.agent",
@@ -92,13 +105,13 @@ async function start() {
 
   rootLogger.info({
     operation: "backend.startup",
-    stage: "deploymentService.init",
+    stage: "launchpad.init",
     status: "start",
   });
-  await deploymentService.init();
+  await launchpadDeploymentService.init();
   rootLogger.info({
     operation: "backend.startup",
-    stage: "deploymentService.init",
+    stage: "launchpad.init",
     status: "success",
   });
 
@@ -111,10 +124,13 @@ async function start() {
     });
   }
 
+  eventIndexerService.start();
+  await eventIndexerService.syncOnce();
+
   const app = createApp({
-    deploymentService,
     tokenRegistryService,
     launchOrchestrator,
+    eventIndexerService,
     chatHistoryService,
     agentService,
     envStatus: config.envStatus,

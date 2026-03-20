@@ -1,0 +1,15 @@
+# macOS / editor noise
+.DS_Store
+.vscode/
+.idea/
+
+# Foundry build and broadcast artifacts
+/broadcast/
+/cache/
+/out/
+
+# Foundry-installed local dependency
+/lib/forge-std/
+
+# Local deployment envs
+/deployments/*.env

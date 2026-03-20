@@ -57,7 +57,6 @@ function createAgentExecutor({
   model,
   provider,
   backendSigner,
-  deploymentService,
   launchOrchestrator,
   logger,
   maxIterations = DEFAULT_MAX_ITERATIONS,
@@ -76,7 +75,6 @@ function createAgentExecutor({
     const tools = createAgentTools({
       provider,
       backendSigner,
-      deploymentService,
       launchOrchestrator,
       chainId,
       emitActions,

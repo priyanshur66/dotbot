@@ -11,20 +11,9 @@ const validationLogger = createLogger({
   ...getLogConfigFromEnv(process.env),
 });
 
-function normalizeDeployRequest(body) {
-  const startedAt = Date.now();
-  const operation = "validation.normalizeDeployRequest";
-  validationLogger.info({
-    operation,
-    stage: "start",
-    status: "start",
-    context: {
-      body: sanitizeForLogging(body),
-    },
-  });
-
-  function fail(message, stage, context = {}) {
-    const validationError = new ValidationError(message);
+function createFail(operation, startedAt, ErrorType = ValidationError) {
+  return (message, stage, context = {}) => {
+    const validationError = new ErrorType(message, context);
     validationError.operation = operation;
     validationError.stage = stage;
     validationLogger.warn({
@@ -35,17 +24,40 @@ function normalizeDeployRequest(body) {
       context,
     });
     throw validationError;
+  };
+}
+
+function normalizeAddress(value, fieldName, fail, stage = `validate.${fieldName}`) {
+  try {
+    return getAddress(value);
+  } catch (_error) {
+    fail(`\`${fieldName}\` is not a valid Ethereum address`, stage, {
+      [fieldName]: value,
+    });
+    return "";
   }
+}
+
+function normalizeLaunchRequest(body) {
+  const startedAt = Date.now();
+  const operation = "validation.normalizeLaunchRequest";
+  const fail = createFail(operation, startedAt);
+
+  validationLogger.info({
+    operation,
+    stage: "start",
+    status: "start",
+    context: {
+      body: sanitizeForLogging(body),
+    },
+  });
 
   if (!body || typeof body !== "object") {
-    fail("Request body is required", "validate.body", {
-      bodyType: typeof body,
-    });
+    fail("Request body is required", "validate.body", { bodyType: typeof body });
   }
 
   const name = typeof body.name === "string" ? body.name.trim() : "";
-  const symbol = typeof body.symbol === "string" ? body.symbol.trim() : "";
-
+  const symbol = typeof body.symbol === "string" ? body.symbol.trim().toUpperCase() : "";
   if (!name) {
     fail("Field `name` is required", "validate.name");
   }
@@ -53,47 +65,22 @@ function normalizeDeployRequest(body) {
     fail("Field `symbol` is required", "validate.symbol");
   }
 
-  const ownerAddressRaw = body.ownerAddress;
-  const adminAddressRaw = body.adminAddress;
-
-  if (!ownerAddressRaw && !adminAddressRaw) {
+  const creatorAddressRaw =
+    body.creatorAddress || body.ownerAddress || body.adminAddress || body.finalOwnerAddress;
+  if (!creatorAddressRaw) {
     fail(
-      "Either `ownerAddress` or `adminAddress` must be provided",
-      "validate.ownerOrAdminRequired"
+      "One of `creatorAddress`, `ownerAddress`, or `adminAddress` must be provided",
+      "validate.creatorAddress.required"
     );
   }
 
-  let ownerAddress;
-  let adminAddress;
+  const creatorAddress = normalizeAddress(
+    creatorAddressRaw,
+    "creatorAddress",
+    fail,
+    "validate.creatorAddress"
+  );
 
-  try {
-    ownerAddress = ownerAddressRaw ? getAddress(ownerAddressRaw) : undefined;
-  } catch (_error) {
-    fail("`ownerAddress` is not a valid Ethereum address", "validate.ownerAddress", {
-      ownerAddressRaw,
-    });
-  }
-
-  try {
-    adminAddress = adminAddressRaw ? getAddress(adminAddressRaw) : undefined;
-  } catch (_error) {
-    fail("`adminAddress` is not a valid Ethereum address", "validate.adminAddress", {
-      adminAddressRaw,
-    });
-  }
-
-  if (ownerAddress && adminAddress && ownerAddress !== adminAddress) {
-    fail(
-      "`ownerAddress` and `adminAddress` must match when both are provided",
-      "validate.ownerAdminMatch",
-      {
-        ownerAddress,
-        adminAddress,
-      }
-    );
-  }
-
-  const finalOwnerAddress = ownerAddress || adminAddress;
   validationLogger.info({
     operation,
     stage: "success",
@@ -102,19 +89,51 @@ function normalizeDeployRequest(body) {
     context: {
       name,
       symbol,
-      finalOwnerAddress,
+      creatorAddress,
     },
   });
+
   return {
     name,
     symbol,
-    finalOwnerAddress,
+    creatorAddress,
   };
+}
+
+function normalizeDeployRequest(body) {
+  const launch = normalizeLaunchRequest(body);
+  return {
+    name: launch.name,
+    symbol: launch.symbol,
+    finalOwnerAddress: launch.creatorAddress,
+  };
+}
+
+function normalizeTokenAddress(value, fieldName = "tokenAddress") {
+  const startedAt = Date.now();
+  const operation = "validation.normalizeTokenAddress";
+  const fail = createFail(operation, startedAt);
+  return normalizeAddress(value, fieldName, fail, `validate.${fieldName}`);
+}
+
+function normalizeCandleInterval(value) {
+  const startedAt = Date.now();
+  const operation = "validation.normalizeCandleInterval";
+  const fail = createFail(operation, startedAt);
+  const normalized = typeof value === "string" ? value.trim() : "";
+  if (!["1m", "5m", "1h", "1d"].includes(normalized)) {
+    fail("`interval` must be one of `1m`, `5m`, `1h`, `1d`", "validate.interval", {
+      interval: value,
+    });
+  }
+  return normalized;
 }
 
 function normalizeAgentChatRequest(body) {
   const startedAt = Date.now();
   const operation = "validation.normalizeAgentChatRequest";
+  const fail = createFail(operation, startedAt, AgentBadRequestError);
+
   validationLogger.info({
     operation,
     stage: "start",
@@ -123,20 +142,6 @@ function normalizeAgentChatRequest(body) {
       body: sanitizeForLogging(body),
     },
   });
-
-  function fail(message, stage, context = {}) {
-    const validationError = new AgentBadRequestError(message, context);
-    validationError.operation = operation;
-    validationError.stage = stage;
-    validationLogger.warn({
-      operation,
-      stage,
-      status: "failure",
-      durationMs: Date.now() - startedAt,
-      context,
-    });
-    throw validationError;
-  }
 
   if (!body || typeof body !== "object") {
     fail("Request body is required", "validate.body", {
@@ -174,14 +179,12 @@ function normalizeAgentChatRequest(body) {
     })
     .slice(-20);
 
-  let walletAddress;
-  try {
-    walletAddress = getAddress(body.walletAddress);
-  } catch (_error) {
-    fail("`walletAddress` must be a valid Ethereum address", "validate.walletAddress", {
-      walletAddress: body.walletAddress,
-    });
-  }
+  const walletAddress = normalizeAddress(
+    body.walletAddress,
+    "walletAddress",
+    fail,
+    "validate.walletAddress"
+  );
 
   const chainId = Number(body.chainId);
   if (!Number.isFinite(chainId) || chainId < 1) {
@@ -189,18 +192,6 @@ function normalizeAgentChatRequest(body) {
       chainId: body.chainId,
     });
   }
-
-  validationLogger.info({
-    operation,
-    stage: "success",
-    status: "success",
-    durationMs: Date.now() - startedAt,
-    context: {
-      walletAddress,
-      chainId: Math.floor(chainId),
-      messageCount: messages.length,
-    },
-  });
 
   return {
     messages,
@@ -210,33 +201,13 @@ function normalizeAgentChatRequest(body) {
 }
 
 function normalizeWalletAddress(value, fail) {
-  try {
-    return getAddress(value);
-  } catch (_error) {
-    fail("`walletAddress` must be a valid Ethereum address", "validate.walletAddress", {
-      walletAddress: value,
-    });
-    return "";
-  }
+  return normalizeAddress(value, "walletAddress", fail, "validate.walletAddress");
 }
 
 function normalizeChatThreadCreateRequest(body) {
   const startedAt = Date.now();
   const operation = "validation.normalizeChatThreadCreateRequest";
-
-  function fail(message, stage, context = {}) {
-    const validationError = new ValidationError(message, context);
-    validationError.operation = operation;
-    validationError.stage = stage;
-    validationLogger.warn({
-      operation,
-      stage,
-      status: "failure",
-      durationMs: Date.now() - startedAt,
-      context,
-    });
-    throw validationError;
-  }
+  const fail = createFail(operation, startedAt);
 
   if (!body || typeof body !== "object") {
     fail("Request body is required", "validate.body", { bodyType: typeof body });
@@ -255,23 +226,12 @@ function normalizeChatThreadCreateRequest(body) {
 function normalizeChatThreadListRequest(query) {
   const startedAt = Date.now();
   const operation = "validation.normalizeChatThreadListRequest";
-
-  function fail(message, stage, context = {}) {
-    const validationError = new ValidationError(message, context);
-    validationError.operation = operation;
-    validationError.stage = stage;
-    validationLogger.warn({
-      operation,
-      stage,
-      status: "failure",
-      durationMs: Date.now() - startedAt,
-      context,
-    });
-    throw validationError;
-  }
+  const fail = createFail(operation, startedAt);
 
   const rawWallet =
-    typeof query?.walletAddress === "string" ? query.walletAddress : String(query?.walletAddress || "");
+    typeof query?.walletAddress === "string"
+      ? query.walletAddress
+      : String(query?.walletAddress || "");
   if (!rawWallet) {
     fail("`walletAddress` query param is required", "validate.walletAddress.required");
   }
@@ -284,50 +244,23 @@ function normalizeChatThreadListRequest(query) {
 function normalizeChatThreadGetRequest(payload) {
   const startedAt = Date.now();
   const operation = "validation.normalizeChatThreadGetRequest";
-
-  function fail(message, stage, context = {}) {
-    const validationError = new ValidationError(message, context);
-    validationError.operation = operation;
-    validationError.stage = stage;
-    validationLogger.warn({
-      operation,
-      stage,
-      status: "failure",
-      durationMs: Date.now() - startedAt,
-      context,
-    });
-    throw validationError;
-  }
+  const fail = createFail(operation, startedAt);
 
   const threadId = typeof payload.threadId === "string" ? payload.threadId.trim() : "";
   if (!threadId) {
     fail("`threadId` is required", "validate.threadId");
   }
 
-  const walletAddress = normalizeWalletAddress(payload.walletAddress, fail);
   return {
     threadId,
-    walletAddress,
+    walletAddress: normalizeWalletAddress(payload.walletAddress, fail),
   };
 }
 
 function normalizeChatThreadReplyRequest(payload) {
   const startedAt = Date.now();
   const operation = "validation.normalizeChatThreadReplyRequest";
-
-  function fail(message, stage, context = {}) {
-    const validationError = new ValidationError(message, context);
-    validationError.operation = operation;
-    validationError.stage = stage;
-    validationLogger.warn({
-      operation,
-      stage,
-      status: "failure",
-      durationMs: Date.now() - startedAt,
-      context,
-    });
-    throw validationError;
-  }
+  const fail = createFail(operation, startedAt);
 
   const threadId = typeof payload.threadId === "string" ? payload.threadId.trim() : "";
   if (!threadId) {
@@ -349,7 +282,10 @@ function normalizeChatThreadReplyRequest(payload) {
 }
 
 module.exports = {
+  normalizeLaunchRequest,
   normalizeDeployRequest,
+  normalizeTokenAddress,
+  normalizeCandleInterval,
   normalizeAgentChatRequest,
   normalizeChatThreadCreateRequest,
   normalizeChatThreadListRequest,

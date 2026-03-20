@@ -18,7 +18,6 @@ function createAgentService({
   openRouterModel,
   openRouterSiteUrl,
   openRouterSiteName,
-  deploymentService,
   launchOrchestrator,
   logger,
 }) {
@@ -32,9 +31,6 @@ function createAgentService({
   }
   if (!openRouterApiKey) {
     throw new ConfigError("OPENROUTER_API_KEY is required for agent service");
-  }
-  if (!deploymentService) {
-    throw new ConfigError("deploymentService is required for agent service");
   }
   if (!launchOrchestrator) {
     throw new ConfigError("launchOrchestrator is required for agent service");
@@ -56,7 +52,6 @@ function createAgentService({
     model,
     provider,
     backendSigner,
-    deploymentService,
     launchOrchestrator,
     logger: serviceLogger,
   });

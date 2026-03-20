@@ -1,4 +1,4 @@
-const { createDeployFixedSupplyTokenTool } = require("./deployFixedSupplyTokenTool");
+const { createLaunchTokenTool } = require("./launchTokenTool");
 const { createErc20CheckBalanceTool } = require("./erc20CheckBalanceTool");
 const { createErc20TransferTool } = require("./erc20TransferTool");
 const { createErc20TransferOwnershipTool } = require("./erc20TransferOwnershipTool");
@@ -7,7 +7,7 @@ const { createErc20BackendTransferFromTool } = require("./erc20BackendTransferFr
 
 function createAgentTools(context) {
   return [
-    createDeployFixedSupplyTokenTool(context),
+    createLaunchTokenTool(context),
     createErc20CheckBalanceTool(context),
     createErc20TransferTool(context),
     createErc20TransferOwnershipTool(context),

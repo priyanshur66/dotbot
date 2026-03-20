@@ -1,0 +1,82 @@
+export type TokenStats = {
+  latestPrice: string;
+  liquidityQuote: string;
+  reserveToken: string;
+  reserveQuote: string;
+  totalVolumeQuote: string;
+  volume24hQuote: string;
+  lastTradeAt: number | null;
+  tradeCount: number;
+  updatedAt: number;
+};
+
+export type TokenLaunch = {
+  id: string;
+  tokenAddress: string;
+  tokenName: string;
+  tokenSymbol: string;
+  creatorAddress: string;
+  ownerAddress: string;
+  launchedByAddress: string;
+  chainId: number;
+  networkName: string;
+  totalSupply: string;
+  decimals: number;
+  launchStatus: string;
+  deployTxHash: string | null;
+  tokenTransferTxHash: string | null;
+  ownershipTransferTxHash: string | null;
+  poolAddress: string | null;
+  quoteTokenAddress: string | null;
+  eventHubAddress: string | null;
+  creatorAllocation: string | null;
+  poolTokenAllocation: string | null;
+  poolUsdtAllocation: string | null;
+  initialPrice: string | null;
+  launchTxHash: string | null;
+  swapFeeBps: number | null;
+  creatorFeeShareBps: number | null;
+  createdAt: number;
+  updatedAt: number;
+  stats: TokenStats | null;
+};
+
+export type TokenEvent = {
+  id: string;
+  chainId: number;
+  tokenAddress: string;
+  poolAddress: string;
+  eventType: string;
+  txHash: string;
+  logIndex: number;
+  blockNumber: number;
+  blockTimestamp: number;
+  trader: string | null;
+  side: string | null;
+  feeAsset: string | null;
+  amountIn: string | null;
+  amountOut: string | null;
+  feeAmount: string | null;
+  creatorFeeAmount: string | null;
+  protocolFeeAmount: string | null;
+  creatorFeesTotal: string | null;
+  protocolFeesTotal: string | null;
+  priceQuoteE18: string | null;
+  reserveTokenAfter: string | null;
+  reserveUsdtAfter: string | null;
+  dataJson: string;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type TokenCandle = {
+  bucketStart: number;
+  open: string;
+  high: string;
+  low: string;
+  close: string;
+  volumeToken: string;
+  volumeQuote: string;
+  tradeCount: number;
+  updatedAt: number;
+};

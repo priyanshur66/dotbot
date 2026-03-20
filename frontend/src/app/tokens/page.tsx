@@ -2,24 +2,8 @@
 
 import Link from "next/link";
 import { FormEvent, useEffect, useMemo, useState } from "react";
-
-type TokenLaunch = {
-  id: string;
-  tokenAddress: string;
-  tokenName: string;
-  tokenSymbol: string;
-  ownerAddress: string;
-  launchedByAddress: string;
-  chainId: number;
-  networkName: string;
-  totalSupply: string;
-  decimals: number;
-  launchStatus: string;
-  deployTxHash: string | null;
-  tokenTransferTxHash: string | null;
-  ownershipTransferTxHash: string | null;
-  createdAt: number;
-};
+import { ethers } from "ethers";
+import type { TokenLaunch } from "@/lib/tokens";
 
 type LaunchResponse = {
   count: number;
@@ -27,6 +11,31 @@ type LaunchResponse = {
   backendUrl?: string;
   message?: string;
 };
+
+function formatQuoteAmount(value?: string | null) {
+  try {
+    return Number(ethers.formatUnits(value || "0", 6)).toLocaleString(undefined, {
+      maximumFractionDigits: 2,
+    });
+  } catch {
+    return "0";
+  }
+}
+
+function formatPrice(value?: string | null) {
+  try {
+    return Number(ethers.formatUnits(value || "0", 18)).toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 6,
+    });
+  } catch {
+    return "0";
+  }
+}
+
+function shortenAddress(value: string) {
+  return `${value.slice(0, 6)}...${value.slice(-4)}`;
+}
 
 export default function TokensPage() {
   const [tokens, setTokens] = useState<TokenLaunch[]>([]);
@@ -38,7 +47,7 @@ export default function TokensPage() {
 
   const title = useMemo(() => {
     if (!activeFilter) {
-      return "All Launched Tokens";
+      return "Launched Tokens";
     }
     return `Tokens Owned By ${activeFilter}`;
   }, [activeFilter]);
@@ -110,21 +119,23 @@ export default function TokensPage() {
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
             <p className="mb-2 inline-flex rounded-full border border-orange-300 bg-orange-50 px-3 py-1 text-xs font-semibold tracking-wide text-orange-800">
-              Launch Registry
+              Launch Directory
             </p>
             <h1 className="text-3xl font-semibold tracking-tight text-slate-900 md:text-4xl">
               {title}
             </h1>
             <p className="mt-2 text-sm text-slate-600 md:text-base">
-              Stored in Convex with deployer, owner, network, and transaction metadata.
+              Indexed from EventHub with latest price, liquidity, and volume snapshots.
             </p>
           </div>
-          <Link
-            href="/"
-            className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-          >
-            Back To Deployer
-          </Link>
+          <div className="flex gap-3">
+            <Link
+              href="/"
+              className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+            >
+              Back To Launchpad
+            </Link>
+          </div>
         </div>
       </section>
 
@@ -132,7 +143,7 @@ export default function TokensPage() {
         <form className="flex flex-col gap-3 md:flex-row" onSubmit={onFilter}>
           <input
             className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 font-mono text-xs outline-none transition focus:border-orange-500 md:text-sm"
-            placeholder="Filter by owner address (0x...)"
+            placeholder="Filter by creator/owner address (0x...)"
             value={ownerFilter}
             onChange={(event) => setOwnerFilter(event.target.value)}
           />
@@ -155,8 +166,7 @@ export default function TokensPage() {
         </form>
 
         <p className="mt-4 text-xs text-slate-600">
-          Active backend:{" "}
-          <span className="font-mono">{backendUrl || "not connected"}</span>
+          Active backend: <span className="font-mono">{backendUrl || "not connected"}</span>
         </p>
 
         {errorMessage && (
@@ -166,7 +176,7 @@ export default function TokensPage() {
         )}
 
         <div className="mt-5 rounded-2xl border border-slate-200 bg-white/75 p-4 text-sm text-slate-700">
-          {isLoading ? "Loading tokens..." : `Total records: ${tokens.length}`}
+          {isLoading ? "Loading tokens..." : `Tracked launches: ${tokens.length}`}
         </div>
       </section>
 
@@ -178,42 +188,59 @@ export default function TokensPage() {
         )}
 
         {tokens.map((token) => (
-          <article
+          <Link
             key={token.id}
-            className="glass-card fade-in stagger-2 rounded-2xl p-5 text-sm text-slate-700"
+            href={`/tokens/${token.tokenAddress}`}
+            className="glass-card fade-in stagger-2 rounded-2xl p-5 text-sm text-slate-700 transition hover:-translate-y-0.5 hover:border-orange-300"
           >
-            <div className="mb-3 flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
-              <h2 className="text-lg font-semibold text-slate-900">
-                {token.tokenName} ({token.tokenSymbol})
-              </h2>
+            <div className="mb-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900">
+                  {token.tokenName} ({token.tokenSymbol})
+                </h2>
+                <p className="mt-1 text-xs text-slate-500">
+                  Creator {shortenAddress(token.creatorAddress)} on {token.networkName}
+                </p>
+              </div>
               <span className="rounded-full border border-emerald-300 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800">
                 {token.launchStatus}
               </span>
             </div>
 
-            <p className="break-all font-mono text-xs">
-              Token: {token.tokenAddress}
-            </p>
-            <p className="mt-1 break-all font-mono text-xs">
-              Owner: {token.ownerAddress}
-            </p>
-            <p className="mt-1 break-all font-mono text-xs">
-              Launched by: {token.launchedByAddress}
-            </p>
-            <p className="mt-2">
-              Network: {token.networkName} ({token.chainId}) | Supply: {token.totalSupply}
-            </p>
-
-            <div className="mt-3 space-y-1 font-mono text-xs">
-              <p className="break-all">Deploy Tx: {token.deployTxHash || "n/a"}</p>
-              <p className="break-all">
-                Token Transfer Tx: {token.tokenTransferTxHash || "n/a"}
-              </p>
-              <p className="break-all">
-                Ownership Transfer Tx: {token.ownershipTransferTxHash || "n/a"}
-              </p>
+            <div className="grid gap-3 md:grid-cols-4">
+              <div className="rounded-2xl border border-slate-200 bg-white/80 p-4">
+                <p className="text-[11px] uppercase tracking-wide text-slate-500">Price</p>
+                <p className="mt-2 text-lg font-semibold text-slate-900">
+                  ${formatPrice(token.stats?.latestPrice || token.initialPrice)}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-white/80 p-4">
+                <p className="text-[11px] uppercase tracking-wide text-slate-500">Liquidity</p>
+                <p className="mt-2 text-lg font-semibold text-slate-900">
+                  ${formatQuoteAmount(token.stats?.liquidityQuote)}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-white/80 p-4">
+                <p className="text-[11px] uppercase tracking-wide text-slate-500">24h Volume</p>
+                <p className="mt-2 text-lg font-semibold text-slate-900">
+                  ${formatQuoteAmount(token.stats?.volume24hQuote)}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-white/80 p-4">
+                <p className="text-[11px] uppercase tracking-wide text-slate-500">Trades</p>
+                <p className="mt-2 text-lg font-semibold text-slate-900">
+                  {token.stats?.tradeCount ?? 0}
+                </p>
+              </div>
             </div>
-          </article>
+
+            <div className="mt-4 grid gap-2 text-xs text-slate-600 md:grid-cols-2">
+              <p className="break-all font-mono">Token: {token.tokenAddress}</p>
+              <p className="break-all font-mono">Pool: {token.poolAddress || "n/a"}</p>
+              <p className="break-all font-mono">Quote: {token.quoteTokenAddress || "n/a"}</p>
+              <p className="break-all font-mono">Launch Tx: {token.launchTxHash || token.deployTxHash || "n/a"}</p>
+            </div>
+          </Link>
         ))}
       </section>
     </main>

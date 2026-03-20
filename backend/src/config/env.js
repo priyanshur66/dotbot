@@ -12,6 +12,9 @@ function getEnvStatus(env = process.env) {
     rpcWriteUrlConfigured: Boolean(env.RPC_WRITE_URL),
     backendPrivateKeyConfigured: Boolean(env.BACKEND_PRIVATE_KEY),
     convexUrlConfigured: Boolean(env.CONVEX_URL),
+    launchpadAddressConfigured: Boolean(env.LAUNCHPAD_ADDRESS),
+    eventHubAddressConfigured: Boolean(env.EVENT_HUB_ADDRESS),
+    quoteTokenAddressConfigured: Boolean(env.QUOTE_TOKEN_ADDRESS),
   };
 }
 
@@ -81,6 +84,10 @@ function validateAndLoadEnv(env = process.env, options = { strict: true }) {
     rpcWriteUrl: env.RPC_WRITE_URL || env.RPC_URL || "",
     backendPrivateKey: env.BACKEND_PRIVATE_KEY || "",
     convexUrl: env.CONVEX_URL || "",
+    protocolTreasuryAddress: env.PROTOCOL_TREASURY_ADDRESS || "",
+    launchpadAddress: env.LAUNCHPAD_ADDRESS || "",
+    eventHubAddress: env.EVENT_HUB_ADDRESS || "",
+    quoteTokenAddress: env.QUOTE_TOKEN_ADDRESS || "",
     openRouterApiKey: env.OPENROUTER_API_KEY || "",
     openRouterModel: env.OPENROUTER_MODEL || "openai/gpt-4.1-mini",
     openRouterSiteUrl: env.OPENROUTER_SITE_URL || "",
