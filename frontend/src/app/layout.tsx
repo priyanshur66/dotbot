@@ -13,8 +13,8 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "ERC20 Token Deployer",
-  description: "Deploy and hand off fixed-supply ERC20 tokens from the backend.",
+  title: "Dot Agent Launchpad",
+  description: "Chat-driven token launches, token feed browsing, and market detail views.",
 };
 
 export default function RootLayout({

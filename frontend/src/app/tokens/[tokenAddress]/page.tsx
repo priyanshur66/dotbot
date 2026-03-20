@@ -138,7 +138,13 @@ function formatTimestamp(timestamp?: number | null) {
   });
 }
 
-function CandleChart({ candles }: { candles: TokenCandle[] }) {
+function CandleChart({
+  candles,
+  variant = "light",
+}: {
+  candles: TokenCandle[];
+  variant?: "light" | "dark";
+}) {
   const points = useMemo(() => {
     if (!candles.length) {
       return [];
@@ -174,16 +180,35 @@ function CandleChart({ candles }: { candles: TokenCandle[] }) {
 
   if (!candles.length) {
     return (
-      <div className="rounded-2xl border border-slate-200 bg-white/80 p-6 text-sm text-slate-500">
+      <div
+        className={`rounded-[28px] border p-6 text-sm ${
+          variant === "dark"
+            ? "border-white/10 bg-slate-950 text-slate-300"
+            : "border-slate-200 bg-white/80 text-slate-500"
+        }`}
+      >
         No candle data indexed yet.
       </div>
     );
   }
 
   return (
-    <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white/90 p-4">
+    <div
+      className={`overflow-x-auto rounded-[28px] border p-4 ${
+        variant === "dark"
+          ? "border-white/10 bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 shadow-[0_25px_60px_rgba(15,23,42,0.45)]"
+          : "border-slate-200 bg-white/90"
+      }`}
+    >
       <svg viewBox="0 0 760 300" className="h-[300px] w-full min-w-[760px]">
-        <rect x="0" y="0" width="760" height="300" rx="18" fill="rgba(248,250,252,0.75)" />
+        <rect
+          x="0"
+          y="0"
+          width="760"
+          height="300"
+          rx="18"
+          fill={variant === "dark" ? "#050816" : "rgba(248,250,252,0.75)"}
+        />
         {points.map((point, index) => {
           const bodyTop = Math.min(point.openY, point.closeY);
           const bodyHeight = Math.max(3, Math.abs(point.closeY - point.openY));
@@ -329,92 +354,97 @@ export default function TokenDetailPage() {
     }
   };
 
+  const launcherAddress = token?.launchedByAddress || token?.creatorAddress || "";
+  const feeRecipientAddress = token?.ownerAddress || "";
+  const explorerBase = POLKADOT_HUB_TESTNET.blockExplorerUrls[0];
+  const contractExplorer = token ? `${explorerBase}/address/${token.tokenAddress}` : "";
+
   return (
-    <main className="mx-auto w-full max-w-7xl px-4 py-8 md:px-8 md:py-12">
-      <section className="mb-6 rounded-3xl border border-orange-200/70 bg-white/70 p-6 backdrop-blur-sm fade-in md:p-8">
-        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+    <main className="mx-auto w-full max-w-7xl px-4 py-6 md:px-8 md:py-8">
+      <section className="fade-in rounded-[32px] border border-slate-200 bg-white/85 p-6 shadow-[0_24px_70px_rgba(15,23,42,0.08)] backdrop-blur-sm md:p-8">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <p className="mb-2 inline-flex rounded-full border border-orange-300 bg-orange-50 px-3 py-1 text-xs font-semibold tracking-wide text-orange-800">
-              Token Market
-            </p>
-            <h1 className="text-3xl font-semibold tracking-tight text-slate-900 md:text-4xl">
-              {token ? `${token.tokenName} (${token.tokenSymbol})` : shortenHash(tokenAddress)}
-            </h1>
-            <p className="mt-2 break-all text-sm text-slate-600 md:text-base">
-              Token address: <span className="font-mono text-xs md:text-sm">{tokenAddress}</span>
-            </p>
+            <Link href="/tokens" className="text-sm font-medium text-slate-500 transition hover:text-slate-900">
+              ← Back to feed
+            </Link>
+            <div className="mt-4 flex flex-col gap-4 md:flex-row md:items-center">
+              <div className="flex h-20 w-20 items-center justify-center rounded-[24px] bg-gradient-to-br from-slate-200 to-slate-100 text-2xl font-semibold text-slate-500">
+                {token ? token.tokenName.slice(0, 1).toUpperCase() : "T"}
+              </div>
+              <div>
+                <div className="flex flex-wrap items-center gap-3">
+                  <h1 className="text-4xl font-semibold tracking-tight text-slate-950 md:text-5xl">
+                    {token ? token.tokenName : shortenHash(tokenAddress)}
+                  </h1>
+                  {token ? (
+                    <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">
+                      {token.launchStatus}
+                    </span>
+                  ) : null}
+                </div>
+                <p className="mt-2 font-mono text-sm text-slate-500">
+                  {token ? `$${token.tokenSymbol}` : tokenAddress}
+                </p>
+              </div>
+            </div>
           </div>
-          <div className="flex gap-3">
+
+          <div className="flex flex-wrap items-center gap-3">
+            <Link
+              href="/chat"
+              className="inline-flex items-center justify-center rounded-full bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800"
+            >
+              Open Chat
+            </Link>
             <Link
               href="/tokens"
-              className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              className="inline-flex items-center justify-center rounded-full border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50"
             >
-              Back To Directory
+              Back to feed
             </Link>
           </div>
         </div>
       </section>
 
-      {errorMessage && (
-        <div className="mb-6 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-900">
+      {errorMessage ? (
+        <div className="mt-6 rounded-[24px] border border-red-200 bg-red-50 p-4 text-sm text-red-900">
           {errorMessage}
-        </div>
-      )}
-
-      {loading && !token ? (
-        <div className="rounded-2xl border border-slate-200 bg-white/80 p-6 text-sm text-slate-600">
-          Loading token market...
         </div>
       ) : null}
 
-      {token && (
-        <>
-          <section className="grid gap-4 md:grid-cols-4">
-            <div className="glass-card rounded-3xl p-5">
-              <p className="text-[11px] uppercase tracking-wide text-slate-500">Price</p>
-              <p className="mt-2 text-2xl font-semibold text-slate-900">
-                ${formatPrice(token.stats?.latestPrice || token.initialPrice)}
-              </p>
-            </div>
-            <div className="glass-card rounded-3xl p-5">
-              <p className="text-[11px] uppercase tracking-wide text-slate-500">Liquidity</p>
-              <p className="mt-2 text-2xl font-semibold text-slate-900">
-                ${formatQuoteAmount(token.stats?.liquidityQuote)}
-              </p>
-            </div>
-            <div className="glass-card rounded-3xl p-5">
-              <p className="text-[11px] uppercase tracking-wide text-slate-500">24h Volume</p>
-              <p className="mt-2 text-2xl font-semibold text-slate-900">
-                ${formatQuoteAmount(token.stats?.volume24hQuote)}
-              </p>
-            </div>
-            <div className="glass-card rounded-3xl p-5">
-              <p className="text-[11px] uppercase tracking-wide text-slate-500">Trades</p>
-              <p className="mt-2 text-2xl font-semibold text-slate-900">
-                {token.stats?.tradeCount ?? 0}
-              </p>
-            </div>
-          </section>
+      {loading && !token ? (
+        <div className="mt-6 rounded-[24px] border border-slate-200 bg-white/80 p-6 text-sm text-slate-500">
+          Loading token view...
+        </div>
+      ) : null}
 
-          <div className="mt-6 grid gap-6 lg:grid-cols-[1.5fr_0.5fr]">
-            <section className="glass-card rounded-3xl p-5 md:p-7">
-              <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+      {token ? (
+        <>
+          <div className="mt-6 grid gap-6 lg:grid-cols-[1.55fr_0.75fr]">
+            <section className="rounded-[32px] border border-slate-200 bg-white/90 p-5 shadow-[0_18px_60px_rgba(15,23,42,0.08)] md:p-6">
+              <div className="flex flex-col gap-4 border-b border-slate-100 pb-5 lg:flex-row lg:items-end lg:justify-between">
                 <div>
-                  <h2 className="text-xl font-semibold text-slate-900">AMM Candles</h2>
+                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">
+                    Market view
+                  </p>
+                  <h2 className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">
+                    Price / MCAP
+                  </h2>
                   <p className="mt-1 text-sm text-slate-600">
                     Event-sourced candles built from indexed swaps and launch liquidity.
                   </p>
                 </div>
-                <div className="flex gap-2">
+
+                <div className="flex flex-wrap gap-2">
                   {(["1m", "5m", "1h", "1d"] as const).map((value) => (
                     <button
                       key={value}
                       type="button"
                       onClick={() => setInterval(value)}
-                      className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                      className={`rounded-full px-4 py-2 text-xs font-semibold transition ${
                         interval === value
-                          ? "bg-orange-700 text-white"
-                          : "border border-slate-300 bg-white text-slate-700"
+                          ? "bg-slate-950 text-white"
+                          : "border border-slate-200 bg-white text-slate-600 hover:border-slate-300"
                       }`}
                     >
                       {value}
@@ -422,86 +452,200 @@ export default function TokenDetailPage() {
                   ))}
                 </div>
               </div>
-              <CandleChart candles={candles} />
-            </section>
 
-            <aside className="glass-card rounded-3xl p-5 md:p-7">
-              <h2 className="text-xl font-semibold text-slate-900">Trade</h2>
-              <p className="mt-1 text-sm text-slate-600">
-                Submit buy and sell transactions directly from your wallet against this pool.
-              </p>
-
-              <form className="mt-5 space-y-4" onSubmit={onTrade}>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setTradeSide("buy")}
-                    className={`rounded-xl px-4 py-2 text-sm font-semibold ${
-                      tradeSide === "buy"
-                        ? "bg-emerald-700 text-white"
-                        : "border border-slate-300 bg-white text-slate-700"
-                    }`}
-                  >
-                    Buy
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setTradeSide("sell")}
-                    className={`rounded-xl px-4 py-2 text-sm font-semibold ${
-                      tradeSide === "sell"
-                        ? "bg-orange-700 text-white"
-                        : "border border-slate-300 bg-white text-slate-700"
-                    }`}
-                  >
-                    Sell
-                  </button>
-                </div>
-
-                <label className="flex flex-col gap-2">
-                  <span className="text-sm font-medium text-slate-700">
-                    Amount in {tradeSide === "buy" ? "USDT" : token.tokenSymbol}
+              <div className="mt-5 rounded-[28px] border border-slate-200 bg-slate-950 p-4">
+                <div className="mb-3 flex items-center justify-between text-xs text-slate-400">
+                  <span>
+                    {token.tokenSymbol}/USD • {interval}
                   </span>
-                  <input
-                    className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-orange-500"
-                    value={tradeAmount}
-                    onChange={(e) => setTradeAmount(e.target.value)}
-                    placeholder={tradeSide === "buy" ? "100" : "2500"}
-                  />
-                </label>
-
-                <button
-                  type="submit"
-                  disabled={isSubmittingTrade}
-                  className="inline-flex w-full items-center justify-center rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {isSubmittingTrade ? "Submitting..." : `Confirm ${tradeSide}`}
-                </button>
-              </form>
-
-              <div className="mt-4 space-y-2 text-xs text-slate-600">
-                <p>Wallet: {walletAddress || "not connected"}</p>
-                <p>Pool: {shortenHash(token.poolAddress)}</p>
-                <p>Quote token: {shortenHash(token.quoteTokenAddress)}</p>
+                  <span>${formatPrice(token.stats?.latestPrice || token.initialPrice)}</span>
+                </div>
+                <CandleChart candles={candles} variant="dark" />
               </div>
 
-              {tradeStatus && (
-                <div className="mt-4 rounded-2xl border border-slate-200 bg-white/80 p-4 text-xs text-slate-700">
-                  {tradeStatus}
+              <div className="mt-5 grid gap-3 md:grid-cols-3">
+                <div className="rounded-[22px] border border-slate-200 bg-slate-50/80 p-4">
+                  <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Price</p>
+                  <p className="mt-2 text-lg font-semibold text-slate-950">
+                    ${formatPrice(token.stats?.latestPrice || token.initialPrice)}
+                  </p>
                 </div>
-              )}
+                <div className="rounded-[22px] border border-slate-200 bg-slate-50/80 p-4">
+                  <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Liquidity</p>
+                  <p className="mt-2 text-lg font-semibold text-slate-950">
+                    ${formatQuoteAmount(token.stats?.liquidityQuote)}
+                  </p>
+                </div>
+                <div className="rounded-[22px] border border-slate-200 bg-slate-50/80 p-4">
+                  <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Trades</p>
+                  <p className="mt-2 text-lg font-semibold text-slate-950">
+                    {token.stats?.tradeCount ?? 0}
+                  </p>
+                </div>
+              </div>
+            </section>
+
+            <aside className="space-y-6">
+              <section className="rounded-[32px] border border-slate-200 bg-white p-5 shadow-sm">
+                <h2 className="text-xl font-semibold tracking-tight text-slate-950">Token Info</h2>
+                <div className="mt-5 space-y-4 text-sm text-slate-700">
+                  <div className="flex items-start justify-between gap-4">
+                    <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                      Launcher
+                    </span>
+                    <span className="max-w-[60%] break-all text-right font-mono text-slate-900">
+                      {shortenHash(launcherAddress)}
+                    </span>
+                  </div>
+                  <div className="flex items-start justify-between gap-4">
+                    <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                      Fee recipient
+                    </span>
+                    <span className="max-w-[60%] break-all text-right font-mono text-slate-900">
+                      {shortenHash(feeRecipientAddress)}
+                    </span>
+                  </div>
+                  <div className="flex items-start justify-between gap-4">
+                    <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                      Chain
+                    </span>
+                    <span className="font-semibold text-slate-950">{token.networkName}</span>
+                  </div>
+                  <div className="flex items-start justify-between gap-4">
+                    <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                      Contract
+                    </span>
+                    <span className="max-w-[60%] break-all text-right font-mono text-slate-900">
+                      {shortenHash(token.tokenAddress)}
+                    </span>
+                  </div>
+                  <div className="flex items-start justify-between gap-4">
+                    <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                      Transaction
+                    </span>
+                    <span className="max-w-[60%] break-all text-right font-mono text-slate-900">
+                      {shortenHash(token.launchTxHash || token.deployTxHash)}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="mt-5 grid gap-3">
+                  <Link
+                    href={contractExplorer}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+                  >
+                    View on Explorer
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void navigator.clipboard.writeText(token.tokenAddress);
+                    }}
+                    className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+                  >
+                    Copy Contract Address
+                  </button>
+                </div>
+              </section>
+
+              <section className="rounded-[32px] border border-slate-200 bg-white p-5 shadow-sm">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <h2 className="text-xl font-semibold tracking-tight text-slate-950">Trade</h2>
+                    <p className="mt-1 text-sm text-slate-600">
+                      Buy or sell directly from your wallet against this pool.
+                    </p>
+                  </div>
+                  <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-600">
+                    {walletAddress ? shortenHash(walletAddress) : "wallet not connected"}
+                  </span>
+                </div>
+
+                <form className="mt-5 space-y-4" onSubmit={onTrade}>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setTradeSide("buy")}
+                      className={`rounded-2xl px-4 py-3 text-sm font-semibold transition ${
+                        tradeSide === "buy"
+                          ? "bg-emerald-700 text-white"
+                          : "border border-slate-200 bg-white text-slate-700 hover:border-slate-300"
+                      }`}
+                    >
+                      Buy
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTradeSide("sell")}
+                      className={`rounded-2xl px-4 py-3 text-sm font-semibold transition ${
+                        tradeSide === "sell"
+                          ? "bg-slate-950 text-white"
+                          : "border border-slate-200 bg-white text-slate-700 hover:border-slate-300"
+                      }`}
+                    >
+                      Sell
+                    </button>
+                  </div>
+
+                  <label className="flex flex-col gap-2">
+                    <span className="text-sm font-medium text-slate-700">
+                      Amount in {tradeSide === "buy" ? "USDT" : token.tokenSymbol}
+                    </span>
+                    <input
+                      className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition placeholder:text-slate-400 focus:border-slate-400"
+                      value={tradeAmount}
+                      onChange={(e) => setTradeAmount(e.target.value)}
+                      placeholder={tradeSide === "buy" ? "100" : "2500"}
+                    />
+                  </label>
+
+                  <button
+                    type="submit"
+                    disabled={isSubmittingTrade}
+                    className="inline-flex w-full items-center justify-center rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {isSubmittingTrade ? "Submitting..." : `Confirm ${tradeSide}`}
+                  </button>
+                </form>
+
+                <div className="mt-4 space-y-2 text-xs text-slate-500">
+                  <p>Pool: {shortenHash(token.poolAddress)}</p>
+                  <p>Quote token: {shortenHash(token.quoteTokenAddress)}</p>
+                  <p>Launch tx: {shortenHash(token.launchTxHash || token.deployTxHash)}</p>
+                </div>
+
+                {tradeStatus ? (
+                  <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-xs leading-6 text-slate-700">
+                    {tradeStatus}
+                  </div>
+                ) : null}
+              </section>
             </aside>
           </div>
 
-          <div className="mt-6 grid gap-6 lg:grid-cols-[0.8fr_1.2fr]">
-            <section className="glass-card rounded-3xl p-5 md:p-7">
-              <h2 className="text-xl font-semibold text-slate-900">Launch Metadata</h2>
+          <div className="mt-6 grid gap-6 lg:grid-cols-[0.85fr_1.15fr]">
+            <section className="rounded-[32px] border border-slate-200 bg-white p-5 shadow-sm md:p-6">
+              <h2 className="text-xl font-semibold tracking-tight text-slate-950">
+                Launch Metadata
+              </h2>
               <div className="mt-4 space-y-3 text-sm text-slate-700">
                 <p className="break-all font-mono text-xs">Creator: {token.creatorAddress}</p>
-                <p className="break-all font-mono text-xs">Pool: {token.poolAddress}</p>
-                <p className="break-all font-mono text-xs">Quote token: {token.quoteTokenAddress}</p>
-                <p className="break-all font-mono text-xs">EventHub: {token.eventHubAddress}</p>
-                <p>Creator allocation: {formatTokenAmount(token.creatorAllocation)} {token.tokenSymbol}</p>
-                <p>Pool token allocation: {formatTokenAmount(token.poolTokenAllocation)} {token.tokenSymbol}</p>
+                <p className="break-all font-mono text-xs">Owner: {token.ownerAddress}</p>
+                <p className="break-all font-mono text-xs">Pool: {token.poolAddress || "n/a"}</p>
+                <p className="break-all font-mono text-xs">
+                  Quote token: {token.quoteTokenAddress || "n/a"}
+                </p>
+                <p className="break-all font-mono text-xs">
+                  EventHub: {token.eventHubAddress || "n/a"}
+                </p>
+                <p>
+                  Creator allocation: {formatTokenAmount(token.creatorAllocation)} {token.tokenSymbol}
+                </p>
+                <p>
+                  Pool token allocation: {formatTokenAmount(token.poolTokenAllocation)} {token.tokenSymbol}
+                </p>
                 <p>Pool USDT allocation: ${formatQuoteAmount(token.poolUsdtAllocation)}</p>
                 <p>Swap fee: {token.swapFeeBps ?? 0} bps</p>
                 <p>Creator fee share: {token.creatorFeeShareBps ?? 0} bps</p>
@@ -509,10 +653,12 @@ export default function TokenDetailPage() {
               </div>
             </section>
 
-            <section className="glass-card rounded-3xl p-5 md:p-7">
-              <div className="mb-4 flex items-center justify-between">
+            <section className="rounded-[32px] border border-slate-200 bg-white p-5 shadow-sm md:p-6">
+              <div className="mb-4 flex items-center justify-between gap-4">
                 <div>
-                  <h2 className="text-xl font-semibold text-slate-900">Recent Activity</h2>
+                  <h2 className="text-xl font-semibold tracking-tight text-slate-950">
+                    Recent Activity
+                  </h2>
                   <p className="mt-1 text-sm text-slate-600">
                     Latest indexed launch, liquidity, swap, and fee events.
                   </p>
@@ -520,7 +666,7 @@ export default function TokenDetailPage() {
                 <button
                   type="button"
                   onClick={() => void loadToken(interval)}
-                  className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                  className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
                 >
                   Refresh
                 </button>
@@ -528,27 +674,29 @@ export default function TokenDetailPage() {
 
               <div className="space-y-3">
                 {events.length === 0 ? (
-                  <div className="rounded-2xl border border-slate-200 bg-white/80 p-5 text-sm text-slate-500">
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5 text-sm text-slate-500">
                     No indexed activity yet.
                   </div>
                 ) : null}
+
                 {events.map((marketEvent) => (
                   <article
                     key={marketEvent.id}
-                    className="rounded-2xl border border-slate-200 bg-white/85 p-4 text-sm text-slate-700"
+                    className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 text-sm text-slate-700"
                   >
                     <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                       <div>
-                        <p className="font-semibold text-slate-900">
+                        <p className="font-semibold text-slate-950">
                           {marketEvent.eventType}
                           {marketEvent.side ? ` • ${marketEvent.side.toUpperCase()}` : ""}
                         </p>
                         <p className="mt-1 text-xs text-slate-500">
-                          {formatTimestamp(marketEvent.blockTimestamp * 1000)} • tx {shortenHash(marketEvent.txHash)}
+                          {formatTimestamp(marketEvent.blockTimestamp * 1000)} • tx{" "}
+                          {shortenHash(marketEvent.txHash)}
                         </p>
                       </div>
                       {marketEvent.priceQuoteE18 ? (
-                        <p className="text-sm font-semibold text-slate-900">
+                        <p className="text-sm font-semibold text-slate-950">
                           ${formatPrice(marketEvent.priceQuoteE18)}
                         </p>
                       ) : null}
@@ -565,7 +713,7 @@ export default function TokenDetailPage() {
             </section>
           </div>
         </>
-      )}
+      ) : null}
     </main>
   );
 }

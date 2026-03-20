@@ -755,7 +755,7 @@ export default function ChatPage() {
               href="/"
               className="rounded-full border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
             >
-              Deployer
+              Launch Home
             </Link>
             <Link
               href="/tokens"

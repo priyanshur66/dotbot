@@ -1,9 +1,9 @@
 @import "tailwindcss";
 
 :root {
-  --background: #f4efe7;
-  --surface: #fffcf5;
-  --surface-strong: #fff7ea;
+  --background: #f6f4ef;
+  --surface: #fffdfa;
+  --surface-strong: #f8f7f3;
   --foreground: #111827;
   --muted: #4b5563;
   --accent: #c2410c;
@@ -11,7 +11,7 @@
   --ok: #0f766e;
   --warn: #b45309;
   --danger: #991b1b;
-  --ring: rgba(194, 65, 12, 0.28);
+  --ring: rgba(51, 65, 85, 0.18);
 }
 
 @theme inline {
@@ -34,16 +34,16 @@ body::before {
   inset: 0;
   pointer-events: none;
   background:
-    radial-gradient(circle at 5% 0%, rgba(194, 65, 12, 0.2), transparent 36%),
-    radial-gradient(circle at 95% 10%, rgba(15, 118, 110, 0.18), transparent 32%),
-    radial-gradient(circle at 50% 100%, rgba(180, 83, 9, 0.15), transparent 35%);
+    radial-gradient(circle at 5% 0%, rgba(251, 146, 60, 0.12), transparent 34%),
+    radial-gradient(circle at 95% 8%, rgba(14, 165, 233, 0.1), transparent 30%),
+    radial-gradient(circle at 50% 100%, rgba(15, 118, 110, 0.08), transparent 35%);
   z-index: -1;
 }
 
 .glass-card {
-  background: linear-gradient(145deg, rgba(255, 252, 245, 0.94), rgba(255, 247, 234, 0.82));
-  border: 1px solid rgba(148, 163, 184, 0.22);
-  box-shadow: 0 16px 35px rgba(0, 0, 0, 0.08);
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.94), rgba(248, 249, 250, 0.88));
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
 }
 
 .fade-in {
