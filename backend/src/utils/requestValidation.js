@@ -204,6 +204,18 @@ function normalizeWalletAddress(value, fail) {
   return normalizeAddress(value, "walletAddress", fail, "validate.walletAddress");
 }
 
+function normalizeTwitterHandle(value, fail) {
+  const handle = typeof value === "string" ? value.trim() : "";
+  const stripped = handle.replace(/^@+/, "");
+  if (!/^[A-Za-z0-9_]{1,15}$/.test(stripped)) {
+    fail("`twitterHandle` must be 1-15 characters and only contain letters, numbers, or underscores", "validate.twitterHandle", {
+      twitterHandle: value,
+    });
+  }
+
+  return `@${stripped}`;
+}
+
 function normalizeChatThreadCreateRequest(body) {
   const startedAt = Date.now();
   const operation = "validation.normalizeChatThreadCreateRequest";
@@ -220,6 +232,36 @@ function normalizeChatThreadCreateRequest(body) {
   return {
     walletAddress,
     title,
+  };
+}
+
+function normalizeTwitterBotUpsertRequest(body) {
+  const startedAt = Date.now();
+  const operation = "validation.normalizeTwitterBotUpsertRequest";
+  const fail = createFail(operation, startedAt);
+
+  if (!body || typeof body !== "object") {
+    fail("Request body is required", "validate.body", { bodyType: typeof body });
+  }
+
+  return {
+    walletAddress: normalizeWalletAddress(body.walletAddress, fail),
+    twitterHandle: normalizeTwitterHandle(body.twitterHandle, fail),
+    enabled: Boolean(body.enabled),
+  };
+}
+
+function normalizeTwitterBotGetRequest(query) {
+  const startedAt = Date.now();
+  const operation = "validation.normalizeTwitterBotGetRequest";
+  const fail = createFail(operation, startedAt);
+
+  if (!query || typeof query !== "object") {
+    fail("Request query is required", "validate.query", { queryType: typeof query });
+  }
+
+  return {
+    walletAddress: normalizeWalletAddress(query.walletAddress, fail),
   };
 }
 
@@ -291,4 +333,6 @@ module.exports = {
   normalizeChatThreadListRequest,
   normalizeChatThreadGetRequest,
   normalizeChatThreadReplyRequest,
+  normalizeTwitterBotUpsertRequest,
+  normalizeTwitterBotGetRequest,
 };

@@ -15,6 +15,10 @@ function getEnvStatus(env = process.env) {
     launchpadAddressConfigured: Boolean(env.LAUNCHPAD_ADDRESS),
     eventHubAddressConfigured: Boolean(env.EVENT_HUB_ADDRESS),
     quoteTokenAddressConfigured: Boolean(env.QUOTE_TOKEN_ADDRESS),
+    twitterBotEnabled: String(env.TWITTER_BOT_ENABLED || "").toLowerCase() === "true",
+    twitterBotTargetHandleConfigured: Boolean(env.TWITTER_BOT_TARGET_HANDLE),
+    twitter241ApiKeyConfigured: Boolean(env.TWITTER241_RAPIDAPI_KEY),
+    twitter241ApiHostConfigured: Boolean(env.TWITTER241_RAPIDAPI_HOST),
   };
 }
 
@@ -92,6 +96,11 @@ function validateAndLoadEnv(env = process.env, options = { strict: true }) {
     openRouterModel: env.OPENROUTER_MODEL || "openai/gpt-4.1-mini",
     openRouterSiteUrl: env.OPENROUTER_SITE_URL || "",
     openRouterSiteName: env.OPENROUTER_SITE_NAME || "",
+    twitterBotEnabled: String(env.TWITTER_BOT_ENABLED || "").toLowerCase() === "true",
+    twitterBotTargetHandle: env.TWITTER_BOT_TARGET_HANDLE || "",
+    twitterBotPollMs: Number(env.TWITTER_BOT_POLL_MS || 30_000),
+    twitter241RapidApiKey: env.TWITTER241_RAPIDAPI_KEY || "",
+    twitter241RapidApiHost: env.TWITTER241_RAPIDAPI_HOST || "",
     port: Number(env.PORT || 3000),
     envStatus: status,
     logConfig,

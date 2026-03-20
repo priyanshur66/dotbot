@@ -27,6 +27,13 @@ describe("env validation", () => {
       rpcWriteUrlConfigured: false,
       backendPrivateKeyConfigured: true,
       convexUrlConfigured: true,
+      launchpadAddressConfigured: false,
+      eventHubAddressConfigured: false,
+      quoteTokenAddressConfigured: false,
+      twitterBotEnabled: false,
+      twitterBotTargetHandleConfigured: false,
+      twitter241ApiKeyConfigured: false,
+      twitter241ApiHostConfigured: false,
     });
   });
 });

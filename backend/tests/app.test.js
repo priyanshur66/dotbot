@@ -27,6 +27,15 @@ function makeTestApp(overrides = {}) {
       name: "polkadot_hub_testnet",
     })),
   };
+  const twitterBotRegistryService = {
+    normalizeWallet: jest.fn((value) => value),
+    getConfigByWallet: jest.fn(),
+    listEventsByWallet: jest.fn(),
+    upsertConfig: jest.fn(),
+  };
+  const twitterBotService = {
+    getTargetHandle: jest.fn(() => "@dotagent"),
+  };
 
   const app = createApp({
     deploymentService,
@@ -34,11 +43,20 @@ function makeTestApp(overrides = {}) {
     launchOrchestrator,
     chatHistoryService,
     agentService,
+    twitterBotRegistryService,
+    twitterBotService,
     envStatus: {
       rpcUrlConfigured: true,
       rpcWriteUrlConfigured: true,
       backendPrivateKeyConfigured: true,
       convexUrlConfigured: true,
+      launchpadAddressConfigured: false,
+      eventHubAddressConfigured: false,
+      quoteTokenAddressConfigured: false,
+      twitterBotEnabled: true,
+      twitterBotTargetHandleConfigured: true,
+      twitter241ApiKeyConfigured: true,
+      twitter241ApiHostConfigured: true,
     },
     ...overrides,
   });
@@ -50,6 +68,8 @@ function makeTestApp(overrides = {}) {
     launchOrchestrator,
     chatHistoryService,
     agentService,
+    twitterBotRegistryService,
+    twitterBotService,
   };
 }
 
@@ -68,8 +88,98 @@ describe("API", () => {
         launchpadAddressConfigured: false,
         eventHubAddressConfigured: false,
         quoteTokenAddressConfigured: false,
+        twitterBotEnabled: true,
+        twitterBotTargetHandleConfigured: true,
+        twitter241ApiKeyConfigured: true,
+        twitter241ApiHostConfigured: true,
       },
     });
+  });
+
+  test("GET /api/twitter-bot/me returns wallet config and events", async () => {
+    const { app, twitterBotRegistryService, twitterBotService } = makeTestApp();
+    twitterBotRegistryService.getConfigByWallet.mockResolvedValue({
+      id: "cfg_1",
+      walletAddress: "0x1111111111111111111111111111111111111111",
+      twitterHandle: "@alice",
+      enabled: true,
+      lastSeenTweetId: "10",
+      lastSeenTweetAt: 1700000000000,
+      lastPolledAt: 1700000005000,
+    });
+    twitterBotRegistryService.listEventsByWallet.mockResolvedValue([
+      {
+        id: "evt_1",
+        tweetId: "10",
+        tweetText: "launch token for me",
+      },
+    ]);
+
+    const response = await request(app).get(
+      "/api/twitter-bot/me?walletAddress=0x1111111111111111111111111111111111111111"
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(twitterBotRegistryService.getConfigByWallet).toHaveBeenCalledWith(
+      "0x1111111111111111111111111111111111111111"
+    );
+    expect(twitterBotService.getTargetHandle).toHaveBeenCalled();
+    expect(response.body).toEqual(
+      expect.objectContaining({
+        walletAddress: "0x1111111111111111111111111111111111111111",
+        targetHandle: "@dotagent",
+        config: expect.objectContaining({
+          twitterHandle: "@alice",
+          enabled: true,
+        }),
+        events: [expect.objectContaining({ tweetId: "10" })],
+      })
+    );
+  });
+
+  test("PUT /api/twitter-bot/me saves wallet config", async () => {
+    const { app, twitterBotRegistryService } = makeTestApp();
+    twitterBotRegistryService.upsertConfig.mockResolvedValue({
+      id: "cfg_1",
+      walletAddress: "0x1111111111111111111111111111111111111111",
+      twitterHandle: "@alice",
+      enabled: true,
+    });
+    twitterBotRegistryService.getConfigByWallet.mockResolvedValue({
+      id: "cfg_1",
+      walletAddress: "0x1111111111111111111111111111111111111111",
+      twitterHandle: "@alice",
+      enabled: true,
+      lastSeenTweetId: null,
+      lastSeenTweetAt: null,
+      lastPolledAt: null,
+    });
+    twitterBotRegistryService.listEventsByWallet.mockResolvedValue([]);
+
+    const response = await request(app).put("/api/twitter-bot/me").send({
+      walletAddress: "0x1111111111111111111111111111111111111111",
+      twitterHandle: "@alice",
+      enabled: true,
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(twitterBotRegistryService.upsertConfig).toHaveBeenCalledWith({
+      walletAddress: "0x1111111111111111111111111111111111111111",
+      twitterHandle: "@alice",
+      enabled: true,
+    });
+  });
+
+  test("PUT /api/twitter-bot/me rejects malformed handles", async () => {
+    const { app } = makeTestApp();
+    const response = await request(app).put("/api/twitter-bot/me").send({
+      walletAddress: "0x1111111111111111111111111111111111111111",
+      twitterHandle: "@bad-handle!",
+      enabled: true,
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.body.error).toBe("BAD_REQUEST");
   });
 
   test("POST /api/tokens/deploy returns 400 for missing name", async () => {

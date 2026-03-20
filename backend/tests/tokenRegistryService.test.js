@@ -29,7 +29,7 @@ describe("token registry service", () => {
 
     expect(result).toEqual({ id: "record-id" });
     expect(convexClient.mutation).toHaveBeenCalledWith(
-      "tokenLaunches:createLaunchRecord",
+      "tokenLaunches:upsertLaunchRecord",
       expect.objectContaining({
         tokenName: "My Token",
         tokenSymbol: "MTK",

@@ -11,6 +11,8 @@ const {
   normalizeChatThreadListRequest,
   normalizeChatThreadGetRequest,
   normalizeChatThreadReplyRequest,
+  normalizeTwitterBotUpsertRequest,
+  normalizeTwitterBotGetRequest,
 } = require("./utils/requestValidation");
 const {
   createNoopLogger,
@@ -233,6 +235,8 @@ function createApp({
   eventIndexerService,
   chatHistoryService,
   agentService,
+  twitterBotRegistryService,
+  twitterBotService,
   envStatus,
   logger,
 }) {
@@ -299,8 +303,163 @@ function createApp({
         launchpadAddressConfigured: envStatus?.launchpadAddressConfigured ?? false,
         eventHubAddressConfigured: envStatus?.eventHubAddressConfigured ?? false,
         quoteTokenAddressConfigured: envStatus?.quoteTokenAddressConfigured ?? false,
+        twitterBotEnabled: envStatus?.twitterBotEnabled ?? false,
+        twitterBotTargetHandleConfigured:
+          envStatus?.twitterBotTargetHandleConfigured ?? false,
+        twitter241ApiKeyConfigured: envStatus?.twitter241ApiKeyConfigured ?? false,
+        twitter241ApiHostConfigured: envStatus?.twitter241ApiHostConfigured ?? false,
       },
     });
+  });
+
+  app.get("/api/twitter-bot/me", async (req, res, next) => {
+    const startedAt = Date.now();
+    const operation = "api.twitterBot.me";
+
+    if (
+      !twitterBotRegistryService ||
+      typeof twitterBotRegistryService.getConfigByWallet !== "function" ||
+      typeof twitterBotRegistryService.listEventsByWallet !== "function"
+    ) {
+      const error = new HttpError(
+        "Twitter bot service is not configured",
+        500,
+        "SERVER_MISCONFIGURATION"
+      );
+      error.operation = operation;
+      error.stage = "service.unavailable";
+      return next(error);
+    }
+
+    try {
+      const payload = normalizeTwitterBotGetRequest(req.query);
+      const [config, events] = await Promise.all([
+        twitterBotRegistryService.getConfigByWallet(payload.walletAddress),
+        twitterBotRegistryService.listEventsByWallet(payload.walletAddress, 20),
+      ]);
+
+      return res.json({
+        walletAddress: payload.walletAddress,
+        targetHandle: twitterBotService?.getTargetHandle?.() || "",
+        pollMs: twitterBotService?.getPollMs?.() || null,
+        config,
+        events,
+        requestId: req.requestId,
+      });
+    } catch (error) {
+      attachErrorContext(error, { operation, stage: "handler" });
+      appLogger.error({
+        operation,
+        stage: "failure",
+        status: "failure",
+        durationMs: Date.now() - startedAt,
+        error,
+        context: {
+          query: sanitizeForLogging(req.query),
+        },
+      });
+      return next(error);
+    }
+  });
+
+  app.put("/api/twitter-bot/me", async (req, res, next) => {
+    const startedAt = Date.now();
+    const operation = "api.twitterBot.me.upsert";
+
+    if (
+      !twitterBotRegistryService ||
+      typeof twitterBotRegistryService.upsertConfig !== "function" ||
+      typeof twitterBotRegistryService.getConfigByWallet !== "function" ||
+      typeof twitterBotRegistryService.listEventsByWallet !== "function"
+    ) {
+      const error = new HttpError(
+        "Twitter bot service is not configured",
+        500,
+        "SERVER_MISCONFIGURATION"
+      );
+      error.operation = operation;
+      error.stage = "service.unavailable";
+      return next(error);
+    }
+
+    try {
+      const payload = normalizeTwitterBotUpsertRequest(req.body);
+      await twitterBotRegistryService.upsertConfig(payload);
+      const [config, events] = await Promise.all([
+        twitterBotRegistryService.getConfigByWallet(payload.walletAddress),
+        twitterBotRegistryService.listEventsByWallet(payload.walletAddress, 20),
+      ]);
+
+      return res.json({
+        walletAddress: payload.walletAddress,
+        targetHandle: twitterBotService?.getTargetHandle?.() || "",
+        pollMs: twitterBotService?.getPollMs?.() || null,
+        config,
+        events,
+        requestId: req.requestId,
+      });
+    } catch (error) {
+      attachErrorContext(error, { operation, stage: "handler" });
+      appLogger.error({
+        operation,
+        stage: "failure",
+        status: "failure",
+        durationMs: Date.now() - startedAt,
+        error,
+        context: {
+          payload: sanitizeForLogging(req.body),
+        },
+      });
+      return next(error);
+    }
+  });
+
+  app.get("/api/twitter-bot/events/:walletAddress", async (req, res, next) => {
+    const startedAt = Date.now();
+    const operation = "api.twitterBot.events";
+
+    if (
+      !twitterBotRegistryService ||
+      typeof twitterBotRegistryService.listEventsByWallet !== "function" ||
+      typeof twitterBotRegistryService.normalizeWallet !== "function"
+    ) {
+      const error = new HttpError(
+        "Twitter bot service is not configured",
+        500,
+        "SERVER_MISCONFIGURATION"
+      );
+      error.operation = operation;
+      error.stage = "service.unavailable";
+      return next(error);
+    }
+
+    try {
+      const walletAddress = twitterBotRegistryService.normalizeWallet(
+        req.params.walletAddress
+      );
+      const events = await twitterBotRegistryService.listEventsByWallet(walletAddress, 50);
+      return res.json({
+        walletAddress,
+        targetHandle: twitterBotService?.getTargetHandle?.() || "",
+        pollMs: twitterBotService?.getPollMs?.() || null,
+        count: events.length,
+        events,
+        requestId: req.requestId,
+      });
+    } catch (error) {
+      attachErrorContext(error, { operation, stage: "handler" });
+      appLogger.error({
+        operation,
+        stage: "failure",
+        status: "failure",
+        durationMs: Date.now() - startedAt,
+        error,
+        context: {
+          walletAddress: req.params.walletAddress,
+        },
+      });
+      return next(error);
+    }
   });
 
   async function handleTokenLaunch(req, res, next, routeOperation) {
