@@ -4,6 +4,10 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { ethers } from "ethers";
+import { AppNavbar } from "@/components/app-navbar";
+import { WalletGate } from "@/components/wallet-gate";
+import { useWallet } from "@/components/wallet-provider";
+import { ensureWalletOnChain, POLKADOT_HUB_TESTNET } from "@/lib/wallet";
 import type { TokenCandle, TokenEvent, TokenLaunch } from "@/lib/tokens";
 
 type TokenDetailResponse = {
@@ -21,28 +25,6 @@ type TokenCandlesResponse = {
   message?: string;
 };
 
-type WalletProvider = {
-  request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
-};
-
-const POLKADOT_HUB_TESTNET = {
-  chainId: 420420417,
-  chainName: "Polkadot Hub TestNet",
-  nativeCurrency: {
-    name: "Paseo",
-    symbol: "PAS",
-    decimals: 18,
-  },
-  rpcUrls: [
-    "https://eth-rpc-testnet.polkadot.io/",
-    "https://services.polkadothub-rpc.com/testnet/",
-  ],
-  blockExplorerUrls: [
-    "https://blockscout-testnet.polkadot.io/",
-    "https://polkadot.testnet.routescan.io/",
-  ],
-};
-
 const ERC20_ABI = [
   "function approve(address spender, uint256 amount) external returns (bool)",
   "function allowance(address owner, address spender) view returns (uint256)",
@@ -55,35 +37,6 @@ const AMM_POOL_ABI = [
   "function swapExactQuoteForToken(uint256 quoteAmountIn, uint256 minTokenOut, address recipient) external returns (uint256)",
   "function swapExactTokenForQuote(uint256 tokenAmountIn, uint256 minQuoteOut, address recipient) external returns (uint256)",
 ];
-
-function getWalletProvider() {
-  if (typeof window === "undefined") {
-    return null;
-  }
-  return (window as Window & { ethereum?: WalletProvider }).ethereum || null;
-}
-
-async function ensureWalletOnChain(provider: ethers.BrowserProvider, chainId: number) {
-  const chainHex = ethers.toQuantity(BigInt(chainId));
-  try {
-    await provider.send("wallet_switchEthereumChain", [{ chainId: chainHex }]);
-  } catch (error) {
-    const switchError = error as { code?: number };
-    if (switchError.code !== 4902) {
-      throw error;
-    }
-    await provider.send("wallet_addEthereumChain", [
-      {
-        chainId: chainHex,
-        chainName: POLKADOT_HUB_TESTNET.chainName,
-        nativeCurrency: POLKADOT_HUB_TESTNET.nativeCurrency,
-        rpcUrls: POLKADOT_HUB_TESTNET.rpcUrls,
-        blockExplorerUrls: POLKADOT_HUB_TESTNET.blockExplorerUrls,
-      },
-    ]);
-    await provider.send("wallet_switchEthereumChain", [{ chainId: chainHex }]);
-  }
-}
 
 function formatPrice(value?: string | null) {
   try {
@@ -242,6 +195,7 @@ function CandleChart({
 }
 
 export default function TokenDetailPage() {
+  const { walletAddress, isReady, getBrowserProvider } = useWallet();
   const params = useParams<{ tokenAddress: string }>();
   const tokenAddress = params.tokenAddress;
   const [token, setToken] = useState<TokenLaunch | null>(null);
@@ -250,7 +204,6 @@ export default function TokenDetailPage() {
   const [interval, setInterval] = useState("1h");
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
-  const [walletAddress, setWalletAddress] = useState("");
   const [tradeSide, setTradeSide] = useState<"buy" | "sell">("buy");
   const [tradeAmount, setTradeAmount] = useState("");
   const [tradeStatus, setTradeStatus] = useState("");
@@ -288,25 +241,30 @@ export default function TokenDetailPage() {
   }, [tokenAddress]);
 
   useEffect(() => {
-    void loadToken(interval);
-  }, [interval, loadToken]);
-
-  const connectWallet = async () => {
-    const injected = getWalletProvider();
-    if (!injected) {
-      setTradeStatus("No wallet detected in this browser.");
-      return null;
+    if (!isReady) {
+      return;
     }
-    const provider = new ethers.BrowserProvider(injected);
-    await provider.send("eth_requestAccounts", []);
-    const signer = await provider.getSigner();
-    const address = await signer.getAddress();
-    setWalletAddress(address);
-    return { provider, signer, address };
-  };
+
+    if (!walletAddress) {
+      setToken(null);
+      setEvents([]);
+      setCandles([]);
+      setLoading(false);
+      setErrorMessage("");
+      setTradeAmount("");
+      setTradeStatus("");
+      return;
+    }
+
+    void loadToken(interval);
+  }, [interval, isReady, loadToken, walletAddress]);
 
   const onTrade = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!walletAddress) {
+      setTradeStatus("Connect wallet on the landing page first.");
+      return;
+    }
     if (!token?.poolAddress || !token.quoteTokenAddress) {
       setTradeStatus("Pool is not available for trading yet.");
       return;
@@ -320,18 +278,22 @@ export default function TokenDetailPage() {
     setTradeStatus("");
 
     try {
-      const connection = await connectWallet();
-      if (!connection) {
+      const provider = getBrowserProvider();
+      if (!provider) {
+        setTradeStatus("No wallet detected in this browser.");
         return;
       }
-      await ensureWalletOnChain(connection.provider, token.chainId || POLKADOT_HUB_TESTNET.chainId);
 
-      const pool = new ethers.Contract(token.poolAddress, AMM_POOL_ABI, connection.signer);
+      await ensureWalletOnChain(provider, token.chainId || POLKADOT_HUB_TESTNET.chainId);
+
+      const signer = await provider.getSigner();
+      const walletSignerAddress = ethers.getAddress(await signer.getAddress());
+      const pool = new ethers.Contract(token.poolAddress, AMM_POOL_ABI, signer);
       const approvalTokenAddress = tradeSide === "buy" ? token.quoteTokenAddress : token.tokenAddress;
       const approvalDecimals = tradeSide === "buy" ? 6 : 18;
       const rawAmount = ethers.parseUnits(tradeAmount.trim(), approvalDecimals);
-      const approvalToken = new ethers.Contract(approvalTokenAddress, ERC20_ABI, connection.signer);
-      const currentAllowance = await approvalToken.allowance(connection.address, token.poolAddress);
+      const approvalToken = new ethers.Contract(approvalTokenAddress, ERC20_ABI, signer);
+      const currentAllowance = await approvalToken.allowance(walletSignerAddress, token.poolAddress);
       if (currentAllowance < rawAmount) {
         setTradeStatus(`Approving ${tradeSide === "buy" ? "USDT" : token.tokenSymbol}...`);
         const approvalTx = await approvalToken.approve(token.poolAddress, ethers.MaxUint256);
@@ -341,8 +303,8 @@ export default function TokenDetailPage() {
       setTradeStatus("Submitting swap transaction...");
       const tx =
         tradeSide === "buy"
-          ? await pool.swapExactQuoteForToken(rawAmount, 0, connection.address)
-          : await pool.swapExactTokenForQuote(rawAmount, 0, connection.address);
+          ? await pool.swapExactQuoteForToken(rawAmount, 0, walletSignerAddress)
+          : await pool.swapExactTokenForQuote(rawAmount, 0, walletSignerAddress);
       await tx.wait();
       setTradeStatus(`Trade confirmed: ${tx.hash}`);
       setTradeAmount("");
@@ -359,49 +321,51 @@ export default function TokenDetailPage() {
   const explorerBase = POLKADOT_HUB_TESTNET.blockExplorerUrls[0];
   const contractExplorer = token ? `${explorerBase}/address/${token.tokenAddress}` : "";
 
+  if (!isReady) {
+    return (
+      <WalletGate
+        title="Restoring your wallet session"
+        description="We are reconnecting your wallet before opening the token detail page."
+      />
+    );
+  }
+
+  if (!walletAddress) {
+    return (
+      <WalletGate
+        title="Connect wallet to view this token"
+        description="Token detail pages are wallet-gated. Connect from the landing page to continue."
+      />
+    );
+  }
+
   return (
     <main className="mx-auto w-full max-w-7xl px-4 py-6 md:px-8 md:py-8">
-      <section className="fade-in rounded-[32px] border border-slate-200 bg-white/85 p-6 shadow-[0_24px_70px_rgba(15,23,42,0.08)] backdrop-blur-sm md:p-8">
-        <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <Link href="/tokens" className="text-sm font-medium text-slate-500 transition hover:text-slate-900">
-              ← Back to feed
-            </Link>
-            <div className="mt-4 flex flex-col gap-4 md:flex-row md:items-center">
-              <div className="flex h-20 w-20 items-center justify-center rounded-[24px] bg-gradient-to-br from-slate-200 to-slate-100 text-2xl font-semibold text-slate-500">
-                {token ? token.tokenName.slice(0, 1).toUpperCase() : "T"}
-              </div>
-              <div>
-                <div className="flex flex-wrap items-center gap-3">
-                  <h1 className="text-4xl font-semibold tracking-tight text-slate-950 md:text-5xl">
-                    {token ? token.tokenName : shortenHash(tokenAddress)}
-                  </h1>
-                  {token ? (
-                    <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">
-                      {token.launchStatus}
-                    </span>
-                  ) : null}
-                </div>
-                <p className="mt-2 font-mono text-sm text-slate-500">
-                  {token ? `$${token.tokenSymbol}` : tokenAddress}
-                </p>
-              </div>
-            </div>
-          </div>
+      <div className="mb-6">
+        <AppNavbar />
+      </div>
 
-          <div className="flex flex-wrap items-center gap-3">
-            <Link
-              href="/chat"
-              className="inline-flex items-center justify-center rounded-full bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800"
-            >
-              Open Chat
-            </Link>
-            <Link
-              href="/tokens"
-              className="inline-flex items-center justify-center rounded-full border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50"
-            >
-              Back to feed
-            </Link>
+      <section className="fade-in rounded-[32px] border border-slate-200 bg-white/85 p-6 shadow-[0_24px_70px_rgba(15,23,42,0.08)] backdrop-blur-sm md:p-8">
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-4 md:flex-row md:items-center">
+            <div className="flex h-20 w-20 items-center justify-center rounded-[24px] bg-gradient-to-br from-slate-200 to-slate-100 text-2xl font-semibold text-slate-500">
+              {token ? token.tokenName.slice(0, 1).toUpperCase() : "T"}
+            </div>
+            <div>
+              <div className="flex flex-wrap items-center gap-3">
+                <h1 className="text-4xl font-semibold tracking-tight text-slate-950 md:text-5xl">
+                  {token ? token.tokenName : shortenHash(tokenAddress)}
+                </h1>
+                {token ? (
+                  <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">
+                    {token.launchStatus}
+                  </span>
+                ) : null}
+              </div>
+              <p className="mt-2 font-mono text-sm text-slate-500">
+                {token ? `$${token.tokenSymbol}` : tokenAddress}
+              </p>
+            </div>
           </div>
         </div>
       </section>

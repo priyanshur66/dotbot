@@ -1,8 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ethers } from "ethers";
+import { AppNavbar } from "@/components/app-navbar";
+import { WalletGate } from "@/components/wallet-gate";
+import { useWallet } from "@/components/wallet-provider";
 import type { TokenLaunch } from "@/lib/tokens";
 
 type LaunchResponse = {
@@ -12,7 +15,7 @@ type LaunchResponse = {
   message?: string;
 };
 
-type FeedTab = "all" | "pending" | "deployed";
+type FeedTab = "pending" | "deployed";
 
 function formatQuoteAmount(value?: string | null) {
   try {
@@ -110,14 +113,13 @@ function matchesQuery(token: TokenLaunch, query: string) {
 }
 
 export default function TokensPage() {
+  const { walletAddress, isReady } = useWallet();
   const [tokens, setTokens] = useState<TokenLaunch[]>([]);
   const [search, setSearch] = useState("");
-  const [activeTab, setActiveTab] = useState<FeedTab>("all");
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
-  const [backendUrl, setBackendUrl] = useState("");
 
-  const loadTokens = async () => {
+  const loadTokens = useCallback(async () => {
     setIsLoading(true);
     setErrorMessage("");
     try {
@@ -131,30 +133,56 @@ export default function TokensPage() {
       }
 
       setTokens(data.tokens || []);
-      setBackendUrl(data.backendUrl || "");
     } catch {
       setErrorMessage("Failed to fetch launched tokens.");
     } finally {
       setIsLoading(false);
     }
-  };
-
-  useEffect(() => {
-    void loadTokens();
   }, []);
 
+  useEffect(() => {
+    if (!isReady) {
+      return;
+    }
+
+    if (!walletAddress) {
+      setTokens([]);
+      return;
+    }
+
+    void loadTokens();
+  }, [isReady, loadTokens, walletAddress]);
+
   const filteredTokens = useMemo(() => {
-    return tokens.filter((token) => {
-      const stage = getStage(token);
-      const matchesTab = activeTab === "all" || stage === activeTab;
-      return matchesTab && matchesQuery(token, search.trim());
-    });
-  }, [activeTab, search, tokens]);
+    return tokens.filter((token) => matchesQuery(token, search.trim()));
+  }, [search, tokens]);
+
+  if (!isReady) {
+    return (
+      <WalletGate
+        title="Restoring your wallet session"
+        description="We are checking the injected wallet before opening the token feed."
+      />
+    );
+  }
+
+  if (!walletAddress) {
+    return (
+      <WalletGate
+        title="Connect wallet to open the token feed"
+        description="The token feed is wallet-gated. Connect from the landing page to continue."
+      />
+    );
+  }
 
   return (
     <main className="mx-auto w-full max-w-7xl px-4 py-6 md:px-8 md:py-8">
+      <div className="mb-6">
+        <AppNavbar />
+      </div>
+
       <section className="fade-in rounded-[32px] border border-slate-200 bg-white/85 p-6 shadow-[0_24px_70px_rgba(15,23,42,0.08)] backdrop-blur-sm md:p-8">
-        <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+        <div className="flex flex-col gap-5">
           <div>
             <p className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.22em] text-slate-600">
               Token Feed
@@ -166,18 +194,6 @@ export default function TokensPage() {
               Search by symbol, address, or creator and jump into the detailed token view for
               charts, swaps, and launch metadata.
             </p>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-3">
-            <Link
-              href="/chat"
-              className="inline-flex items-center justify-center rounded-full bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800"
-            >
-              Open Chat
-            </Link>
-            <span className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600">
-              Backend {backendUrl ? "connected" : "offline"}
-            </span>
           </div>
         </div>
 
@@ -191,31 +207,6 @@ export default function TokensPage() {
               className="w-full rounded-full border border-slate-200 bg-white px-5 py-3 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-slate-400"
             />
           </label>
-
-          <div className="inline-flex overflow-hidden rounded-full border border-slate-200 bg-white p-1">
-            {(["all", "pending", "deployed"] as const).map((tab) => {
-              const active = activeTab === tab;
-              return (
-                <button
-                  key={tab}
-                  type="button"
-                  onClick={() => setActiveTab(tab)}
-                  className={`px-5 py-2 text-sm font-semibold transition ${
-                    active ? "rounded-full bg-slate-950 text-white" : "text-slate-600 hover:text-slate-900"
-                  }`}
-                >
-                  {tab === "all" ? "All" : tab === "pending" ? "Pending" : "Deployed"}
-                </button>
-              );
-            })}
-          </div>
-
-          <Link
-            href="/chat"
-            className="inline-flex items-center justify-center rounded-full border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50"
-          >
-            Launch Token
-          </Link>
         </div>
 
         <div className="mt-4 flex flex-wrap gap-2 text-xs text-slate-500">
