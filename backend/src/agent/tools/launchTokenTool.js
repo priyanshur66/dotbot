@@ -29,6 +29,89 @@ function deriveSymbolFromName(name) {
   return compact.slice(0, 8);
 }
 
+function pickString(value, fallback = null) {
+  return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+
+function buildLaunchSuccessPayload({
+  tokenName,
+  tokenSymbol,
+  creatorAddress,
+  deployed,
+  launchRecordId,
+  launchStatus,
+}) {
+  return {
+    success: true,
+    launchStatus,
+    name: tokenName,
+    symbol: tokenSymbol,
+    creatorAddress,
+    tokenAddress: deployed.tokenAddress,
+    poolAddress: deployed.poolAddress,
+    quoteTokenAddress: deployed.quoteTokenAddress,
+    transactions: deployed.transactions,
+    network: deployed.network,
+    launchRecordId,
+  };
+}
+
+function buildLaunchFailurePayload({
+  error,
+  tokenName,
+  tokenSymbol,
+  creatorAddress,
+}) {
+  const details = error && typeof error === "object" && error.details ? error.details : {};
+  const transactions =
+    details && typeof details.transactions === "object"
+      ? {
+          launch: details.transactions.launch || null,
+          deploy: details.transactions.deploy || null,
+          tokenTransfer: details.transactions.tokenTransfer || null,
+          ownershipTransfer: details.transactions.ownershipTransfer || null,
+        }
+      : {
+          launch: null,
+          deploy: null,
+          tokenTransfer: null,
+          ownershipTransfer: null,
+        };
+
+  const causeMessage =
+    error &&
+    typeof error === "object" &&
+    error.cause &&
+    typeof error.cause.message === "string"
+      ? error.cause.message.trim()
+      : null;
+
+  return {
+    success: false,
+    launchStatus: pickString(details.launchStatus, "failed"),
+    name: pickString(details.name, tokenName) || tokenName,
+    symbol: pickString(details.symbol, tokenSymbol) || tokenSymbol,
+    creatorAddress: pickString(details.creatorAddress, creatorAddress) || creatorAddress,
+    tokenAddress: pickString(details.tokenAddress),
+    poolAddress: pickString(details.poolAddress),
+    quoteTokenAddress: pickString(details.quoteTokenAddress),
+    transactions,
+    network:
+      details && typeof details.network === "object" && details.network
+        ? details.network
+        : null,
+    launchRecordId: pickString(details.launchRecordId),
+    errorCode:
+      error && typeof error === "object" && typeof error.code === "string"
+        ? error.code
+        : "TOKEN_LAUNCH_FAILED",
+    errorMessage:
+      pickString(details.recovery) ||
+      causeMessage ||
+      (error instanceof Error && error.message ? error.message : "Token launch failed."),
+  };
+}
+
 function createLaunchTokenTool({ launchOrchestrator, emitActions, walletAddress }) {
   return tool(
     async (input) => {
@@ -39,39 +122,62 @@ function createLaunchTokenTool({ launchOrchestrator, emitActions, walletAddress 
           ? input.symbol.trim().toUpperCase()
           : deriveSymbolFromName(tokenName);
 
-      const launchResult = await launchOrchestrator.deployAndPersistLaunch({
-        name: tokenName,
-        symbol: tokenSymbol,
-        creatorAddress,
-      });
-      const { deployed, launchRecordId, launchStatus } = launchResult;
+      try {
+        const launchResult = await launchOrchestrator.deployAndPersistLaunch({
+          name: tokenName,
+          symbol: tokenSymbol,
+          creatorAddress,
+        });
+        const { deployed, launchRecordId, launchStatus } = launchResult;
+        const successPayload = buildLaunchSuccessPayload({
+          tokenName,
+          tokenSymbol,
+          creatorAddress,
+          deployed,
+          launchRecordId,
+          launchStatus,
+        });
 
-      emitActions([
-        createAgentAction({
-          type: AGENT_ACTION_TYPES.BACKEND_TX_SUBMITTED,
+        emitActions([
+          createAgentAction({
+            type: AGENT_ACTION_TYPES.BACKEND_TX_SUBMITTED,
+            tool: "launch_token",
+            status: AGENT_ACTION_STATUSES.COMPLETED,
+            txHash: deployed.transactions?.launch || deployed.transactions?.deploy || null,
+            result: successPayload,
+          }),
+        ]);
+
+        return JSON.stringify({
           tool: "launch_token",
-          status: AGENT_ACTION_STATUSES.COMPLETED,
-          txHash: deployed.transactions?.launch || deployed.transactions?.deploy || null,
-          result: {
-            tokenAddress: deployed.tokenAddress,
-            poolAddress: deployed.poolAddress,
-            creatorAddress: deployed.creatorAddress,
-            quoteTokenAddress: deployed.quoteTokenAddress,
-            transactions: deployed.transactions,
-            network: deployed.network,
-            launchRecordId,
-            launchStatus,
-          },
-        }),
-      ]);
+          ...successPayload,
+        });
+      } catch (error) {
+        const failurePayload = buildLaunchFailurePayload({
+          error,
+          tokenName,
+          tokenSymbol,
+          creatorAddress,
+        });
 
-      return JSON.stringify({
-        success: true,
-        tool: "launch_token",
-        deployed,
-        launchRecordId,
-        launchStatus,
-      });
+        emitActions([
+          createAgentAction({
+            type: AGENT_ACTION_TYPES.BACKEND_TX_SUBMITTED,
+            tool: "launch_token",
+            status: AGENT_ACTION_STATUSES.FAILED,
+            txHash:
+              failurePayload.transactions?.launch ||
+              failurePayload.transactions?.deploy ||
+              null,
+            result: failurePayload,
+          }),
+        ]);
+
+        return JSON.stringify({
+          tool: "launch_token",
+          ...failurePayload,
+        });
+      }
     },
     {
       name: "launch_token",

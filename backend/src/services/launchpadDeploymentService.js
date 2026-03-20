@@ -22,9 +22,11 @@ const DEFAULT_BOOTSTRAP_QUOTE_MULTIPLIER = 1_000n;
 const DEFAULT_MIN_PRIORITY_GAS_PRICE_WEI = 1_000_000_000_000n;
 const DEFAULT_MAX_FEE_MULTIPLIER = 2n;
 const DEFAULT_LEGACY_GAS_PRICE_MULTIPLIER = 3n;
+const DEFAULT_RETRY_GAS_PRICE_BUMP_MULTIPLIER = 2n;
 const GAS_LIMIT_BUFFER_NUMERATOR = 12n;
 const GAS_LIMIT_BUFFER_DENOMINATOR = 10n;
 const POLKADOT_HUB_TESTNET_CHAIN_ID = 420420417;
+const LOW_PRIORITY_RETRY_ATTEMPTS = 3;
 
 function parsePositiveInt(value, fallback) {
   const parsed = Number(value);
@@ -132,7 +134,17 @@ function createLaunchpadDeploymentService({
   const forceLegacyTransactions =
     String(process.env.RPC_WRITE_USE_LEGACY || "").toLowerCase() === "true";
 
-  async function buildTxOverrides(estimateGasFn) {
+  function isLowPriorityTxError(error) {
+    const message = error instanceof Error ? error.message : String(error || "");
+    const normalized = message.toLowerCase();
+    return (
+      normalized.includes("priority is too low") ||
+      normalized.includes("replacement transaction underpriced") ||
+      normalized.includes("transaction underpriced")
+    );
+  }
+
+  async function buildTxOverrides(estimateGasFn, retryAttempt = 0) {
     const [feeData, latestBlock, network] = await Promise.all([
       provider.getFeeData(),
       provider.getBlock("latest"),
@@ -159,10 +171,11 @@ function createLaunchpadDeploymentService({
       forceLegacyTransactions || Number(network.chainId) === POLKADOT_HUB_TESTNET_CHAIN_ID;
 
     if (shouldUseLegacyTransactions) {
-      const legacyGasPrice = configuredLegacyGasPrice || bigintMax(
-        gasPrice * DEFAULT_LEGACY_GAS_PRICE_MULTIPLIER,
-        configuredMinPriorityGasPrice
-      );
+      const retryMultiplier = DEFAULT_RETRY_GAS_PRICE_BUMP_MULTIPLIER ** BigInt(retryAttempt);
+      const baseLegacyGasPrice =
+        configuredLegacyGasPrice ||
+        bigintMax(gasPrice * DEFAULT_LEGACY_GAS_PRICE_MULTIPLIER, configuredMinPriorityGasPrice);
+      const legacyGasPrice = baseLegacyGasPrice * retryMultiplier;
       return {
         ...(gasLimit ? { gasLimit } : {}),
         type: 0,
@@ -175,6 +188,54 @@ function createLaunchpadDeploymentService({
       maxPriorityFeePerGas: priorityFeePerGas,
       maxFeePerGas,
     };
+  }
+
+  async function sendTxWithLowPriorityRetry({
+    operation,
+    stage,
+    estimateGasFn,
+    sendTx,
+    maxAttempts = LOW_PRIORITY_RETRY_ATTEMPTS,
+  }) {
+    let lastError;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      try {
+        const txOverrides = await buildTxOverrides(estimateGasFn, attempt);
+        return await sendTx(txOverrides);
+      } catch (error) {
+        lastError = error;
+        if (!isLowPriorityTxError(error) || attempt >= maxAttempts - 1) {
+          break;
+        }
+
+        serviceLogger.warn({
+          operation,
+          stage,
+          status: "retry",
+          context: {
+            attempt: attempt + 1,
+            maxAttempts,
+            reason: error instanceof Error ? error.message : String(error),
+          },
+        });
+      }
+    }
+
+    if (
+      lastError &&
+      typeof lastError === "object" &&
+      isLowPriorityTxError(lastError) &&
+      !lastError.details
+    ) {
+      lastError.details = {};
+    }
+    if (lastError && typeof lastError === "object" && isLowPriorityTxError(lastError)) {
+      lastError.details.recovery =
+        "RPC rejected the launch transaction as too low priority after multiple retries.";
+    }
+
+    throw lastError;
   }
 
   let artifactsPromise;
@@ -286,33 +347,37 @@ function createLaunchpadDeploymentService({
 
         const registeredLaunchpad = await eventHub.launchpad();
         if (!registeredLaunchpad || registeredLaunchpad.toLowerCase() !== resolvedLaunchpadAddress.toLowerCase()) {
-          const txOverrides = await buildTxOverrides(() =>
-            eventHub.setLaunchpad.estimateGas(resolvedLaunchpadAddress)
-          );
-          const tx = await eventHub.setLaunchpad(resolvedLaunchpadAddress, txOverrides);
+          const tx = await sendTxWithLowPriorityRetry({
+            operation: "service.launchpad.ensureInfrastructure",
+            stage: "eventHub.setLaunchpad",
+            estimateGasFn: () => eventHub.setLaunchpad.estimateGas(resolvedLaunchpadAddress),
+            sendTx: (txOverrides) => eventHub.setLaunchpad(resolvedLaunchpadAddress, txOverrides),
+          });
           await tx.wait();
         }
 
         const currentBalance = await mockUsdt.balanceOf(wallet.address);
         if (currentBalance < initialQuoteLiquidity) {
           const mintTarget = bootstrapQuoteMintAmount > initialQuoteLiquidity ? bootstrapQuoteMintAmount : initialQuoteLiquidity;
-          const txOverrides = await buildTxOverrides(() =>
-            mockUsdt.mint.estimateGas(wallet.address, mintTarget)
-          );
-          const mintTx = await mockUsdt.mint(wallet.address, mintTarget, txOverrides);
+          const mintTx = await sendTxWithLowPriorityRetry({
+            operation: "service.launchpad.ensureInfrastructure",
+            stage: "quote.mint",
+            estimateGasFn: () => mockUsdt.mint.estimateGas(wallet.address, mintTarget),
+            sendTx: (txOverrides) => mockUsdt.mint(wallet.address, mintTarget, txOverrides),
+          });
           await mintTx.wait();
         }
 
         const allowance = await mockUsdt.allowance(wallet.address, resolvedLaunchpadAddress);
         if (allowance < initialQuoteLiquidity) {
-          const txOverrides = await buildTxOverrides(() =>
-            mockUsdt.approve.estimateGas(resolvedLaunchpadAddress, ethers.MaxUint256)
-          );
-          const approveTx = await mockUsdt.approve(
-            resolvedLaunchpadAddress,
-            ethers.MaxUint256,
-            txOverrides
-          );
+          const approveTx = await sendTxWithLowPriorityRetry({
+            operation: "service.launchpad.ensureInfrastructure",
+            stage: "quote.approve",
+            estimateGasFn: () =>
+              mockUsdt.approve.estimateGas(resolvedLaunchpadAddress, ethers.MaxUint256),
+            sendTx: (txOverrides) =>
+              mockUsdt.approve(resolvedLaunchpadAddress, ethers.MaxUint256, txOverrides),
+          });
           await approveTx.wait();
         }
 
@@ -369,10 +434,12 @@ function createLaunchpadDeploymentService({
       );
       const eventHubInterface = new ethers.Interface(artifacts.eventHub.abi);
 
-      const txOverrides = await buildTxOverrides(() =>
-        launchpad.launchToken.estimateGas(name, symbol, creator)
-      );
-      const tx = await launchpad.launchToken(name, symbol, creator, txOverrides);
+      const tx = await sendTxWithLowPriorityRetry({
+        operation,
+        stage: "submit",
+        estimateGasFn: () => launchpad.launchToken.estimateGas(name, symbol, creator),
+        sendTx: (txOverrides) => launchpad.launchToken(name, symbol, creator, txOverrides),
+      });
       const receipt = await tx.wait();
 
       let launchEvent = null;

@@ -46,6 +46,187 @@ function chunkText(input, chunkSize = 32) {
   return chunks;
 }
 
+function isMeaningfulAssistantText(value) {
+  if (typeof value !== "string") {
+    return false;
+  }
+  const normalized = value.trim().toLowerCase();
+  return Boolean(normalized) && normalized !== "done.";
+}
+
+function getLatestLaunchAction(actions) {
+  if (!Array.isArray(actions)) {
+    return null;
+  }
+  for (let index = actions.length - 1; index >= 0; index -= 1) {
+    const action = actions[index];
+    if (action?.tool === "launch_token") {
+      return action;
+    }
+  }
+  return null;
+}
+
+function buildLaunchAssistantMessage(action, fallbackMessage) {
+  const result = action && typeof action.result === "object" ? action.result : {};
+  const launchStatus =
+    typeof result.launchStatus === "string" && result.launchStatus
+      ? result.launchStatus
+      : action?.status === "completed"
+        ? "completed"
+        : action?.status === "failed"
+          ? "failed"
+          : "unknown";
+
+  const lines = [];
+
+  if (launchStatus === "completed") {
+    lines.push("Token launch successful.");
+  } else if (launchStatus === "launch_pending") {
+    lines.push("Token launch is pending.");
+  } else {
+    lines.push("Token launch failed.");
+  }
+
+  if (typeof result.name === "string" && result.name.trim()) {
+    lines.push(`Name: ${result.name.trim()}`);
+  }
+  if (typeof result.symbol === "string" && result.symbol.trim()) {
+    lines.push(`Symbol: ${result.symbol.trim()}`);
+  }
+  if (typeof result.tokenAddress === "string" && result.tokenAddress.trim()) {
+    lines.push(`Token: ${result.tokenAddress.trim()}`);
+  }
+  if (typeof result.poolAddress === "string" && result.poolAddress.trim()) {
+    lines.push(`Pool: ${result.poolAddress.trim()}`);
+  }
+
+  const txHash =
+    (typeof action?.txHash === "string" && action.txHash.trim()) ||
+    (result.transactions &&
+    typeof result.transactions === "object" &&
+    typeof result.transactions.launch === "string" &&
+    result.transactions.launch.trim()
+      ? result.transactions.launch.trim()
+      : null) ||
+    (result.transactions &&
+    typeof result.transactions === "object" &&
+    typeof result.transactions.deploy === "string" &&
+    result.transactions.deploy.trim()
+      ? result.transactions.deploy.trim()
+      : null);
+
+  if (txHash) {
+    lines.push(`Transaction: ${txHash}`);
+  }
+
+  if (typeof result.launchRecordId === "string" && result.launchRecordId.trim()) {
+    lines.push(`Launch record: ${result.launchRecordId.trim()}`);
+  }
+
+  if (typeof result.errorMessage === "string" && result.errorMessage.trim()) {
+    lines.push(`Reason: ${result.errorMessage.trim()}`);
+  }
+
+  if (isMeaningfulAssistantText(fallbackMessage) && !fallbackMessage.startsWith(lines[0])) {
+    lines.push("");
+    lines.push(fallbackMessage.trim());
+  }
+
+  return lines.join("\n");
+}
+
+function isLaunchToolFailure(error) {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const details = error.details && typeof error.details === "object" ? error.details : {};
+  return (
+    details.tool === "launch_token" ||
+    (error.code === "ON_CHAIN_TRANSACTION_FAILED" &&
+      typeof details.name === "string" &&
+      typeof details.symbol === "string") ||
+    (error.code === "AGENT_TOOL_EXECUTION_FAILED" && details.tool === "launch_token")
+  );
+}
+
+function buildLaunchFailureAgentResult(error, network, agentService) {
+  const details = error && typeof error === "object" && error.details ? error.details : {};
+  const action = {
+    id: `act_launch_failure_${randomUUID()}`,
+    type: "backend_tx_submitted",
+    tool: "launch_token",
+    status: "failed",
+    txHash:
+      (details.transactions &&
+      typeof details.transactions === "object" &&
+      (details.transactions.launch || details.transactions.deploy)) ||
+      null,
+    result: {
+      success: false,
+      launchStatus:
+        typeof details.launchStatus === "string" && details.launchStatus
+          ? details.launchStatus
+          : "failed",
+      name:
+        (typeof details.name === "string" && details.name) ||
+        (details.args && typeof details.args === "object" && details.args.name) ||
+        "Token",
+      symbol:
+        (typeof details.symbol === "string" && details.symbol) ||
+        (details.args && typeof details.args === "object" && details.args.symbol) ||
+        "",
+      creatorAddress:
+        typeof details.creatorAddress === "string" ? details.creatorAddress : null,
+      tokenAddress: typeof details.tokenAddress === "string" ? details.tokenAddress : null,
+      poolAddress: typeof details.poolAddress === "string" ? details.poolAddress : null,
+      quoteTokenAddress:
+        typeof details.quoteTokenAddress === "string" ? details.quoteTokenAddress : null,
+      transactions:
+        details.transactions && typeof details.transactions === "object"
+          ? details.transactions
+          : {
+              launch: null,
+              deploy: null,
+              tokenTransfer: null,
+              ownershipTransfer: null,
+            },
+      network:
+        details.network && typeof details.network === "object" ? details.network : network || null,
+      launchRecordId:
+        typeof details.launchRecordId === "string" ? details.launchRecordId : null,
+      errorCode:
+        typeof error.code === "string" ? error.code : "TOKEN_LAUNCH_FAILED",
+      errorMessage:
+        typeof details.recovery === "string" && details.recovery
+          ? details.recovery
+          : error instanceof Error && error.message
+            ? error.message
+            : "Token launch failed.",
+    },
+  };
+
+  return {
+    message: buildLaunchAssistantMessage(action),
+    actions: [action],
+    backendWalletAddress:
+      typeof agentService?.getBackendWalletAddress === "function"
+        ? agentService.getBackendWalletAddress()
+        : undefined,
+    network: network || null,
+    model: null,
+  };
+}
+
+function resolveAssistantMessage(agentResult) {
+  const launchAction = getLatestLaunchAction(agentResult?.actions);
+  if (!launchAction) {
+    return agentResult?.message || "Done.";
+  }
+  return buildLaunchAssistantMessage(launchAction, agentResult?.message);
+}
+
 function createApp({
   tokenRegistryService,
   launchOrchestrator,
@@ -697,17 +878,27 @@ function createApp({
       }));
 
       const network = await agentService.getNetworkInfo();
-      const agentResult = await agentService.chat({
-        messages: history,
-        walletAddress: payload.walletAddress,
-        chainId: network.chainId,
-      });
+      let agentResult;
+      try {
+        agentResult = await agentService.chat({
+          messages: history,
+          walletAddress: payload.walletAddress,
+          chainId: network.chainId,
+        });
+      } catch (error) {
+        if (!isLaunchToolFailure(error)) {
+          throw error;
+        }
+        agentResult = buildLaunchFailureAgentResult(error, network, agentService);
+      }
+
+      const assistantMessage = resolveAssistantMessage(agentResult);
 
       const savedAssistant = await chatHistoryService.appendMessage({
         threadId: payload.threadId,
         walletAddress: payload.walletAddress,
         role: "assistant",
-        content: agentResult.message || "Done.",
+        content: assistantMessage,
         actions: agentResult.actions || [],
         requestId: req.requestId,
       });

@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AppNavbar } from "@/components/app-navbar";
+import { AppShell } from "@/components/app-navbar";
 import { WalletGate } from "@/components/wallet-gate";
 import { useWallet } from "@/components/wallet-provider";
 
@@ -158,6 +158,21 @@ function buildApiErrorMessage(payload: Record<string, unknown>, fallback: string
   return `${message} | ${notes.join(" | ")}`;
 }
 
+function readActionResultField(action: AgentAction, field: string) {
+  if (!action.result || typeof action.result !== "object") {
+    return "";
+  }
+  const value = action.result[field];
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function compactAddress(value?: string | null) {
+  if (!value) {
+    return "";
+  }
+  return value.length > 12 ? `${value.slice(0, 6)}...${value.slice(-4)}` : value;
+}
+
 function sortMessages(messages: ThreadMessage[]) {
   return [...messages].sort((left, right) => {
     const leftTime = Number(left.createdAt || 0);
@@ -214,6 +229,7 @@ export default function ChatPage() {
   const [errorMessage, setErrorMessage] = useState("");
   const walletAddressRef = useRef(walletAddress);
   const activeThreadIdRef = useRef(activeThreadId);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const canSend = useMemo(() => {
     return Boolean(draft.trim()) && Boolean(walletAddress) && Boolean(activeThreadId) && !isSending;
@@ -226,6 +242,10 @@ export default function ChatPage() {
   useEffect(() => {
     activeThreadIdRef.current = activeThreadId;
   }, [activeThreadId]);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
   const loadThread = useCallback(async (threadId: string, forWalletAddress: string) => {
     if (!threadId || !forWalletAddress) {
@@ -598,38 +618,47 @@ export default function ChatPage() {
   }
 
   return (
-    <main className="mx-auto w-full max-w-7xl px-4 py-8 md:px-8 md:py-10">
-      <div className="mb-6">
-        <AppNavbar />
-      </div>
+    <AppShell
+      eyebrow="Assistant"
+      title="AI Chat"
+      description="Launch and manage tokens through natural language."
+    >
+      <section className="grid h-full grid-cols-1 gap-5 xl:grid-cols-[320px_1fr]">
+        <aside className="panel-soft flex flex-col rounded-[32px] p-4 md:p-5 overflow-hidden">
+          <div className="px-1 py-2">
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
+              Threads
+            </p>
+            <h2 className="mt-1.5 text-lg font-semibold tracking-tight text-slate-900">
+              Your launches
+            </h2>
+          </div>
 
-      <section className="mt-2 grid min-h-[68vh] grid-cols-1 gap-4 md:grid-cols-[280px_1fr]">
-        <aside className="rounded-3xl border border-slate-200 bg-white/90 p-4 shadow-[0_18px_40px_rgba(15,23,42,0.08)] md:p-5">
-          <button
-            type="button"
-            disabled={!walletAddress || isCreatingThread}
-            onClick={() => {
-              void (async () => {
-                const created = await createNewThread();
-                if (created) {
-                  await loadThread(created.id, walletAddress);
-                }
-              })();
-            }}
-            className="w-full rounded-xl bg-orange-700 px-3 py-2 text-sm font-semibold text-white hover:bg-orange-800 disabled:opacity-60"
-          >
-            {isCreatingThread ? "Creating..." : "New chat"}
-          </button>
+          <div className="mt-4 flex-1 min-h-0 overflow-y-auto space-y-2 pr-1">
+            <button
+              type="button"
+              disabled={!walletAddress || isCreatingThread}
+              onClick={() => {
+                void (async () => {
+                  const created = await createNewThread();
+                  if (created) {
+                    await loadThread(created.id, walletAddress);
+                  }
+                })();
+              }}
+              className="button-primary inline-flex w-full items-center justify-center rounded-[22px] px-4 py-3 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isCreatingThread ? "Creating..." : "+ New chat"}
+            </button>
 
-          <div className="mt-4 space-y-2">
             {isLoadingThreads ? (
-              <p className="rounded-xl border border-slate-200 bg-white p-3 text-xs text-slate-500">
+              <p className="panel rounded-[22px] p-4 text-xs text-slate-500">
                 Loading threads...
               </p>
             ) : null}
 
             {!isLoadingThreads && threads.length === 0 ? (
-              <p className="rounded-xl border border-slate-200 bg-white p-3 text-xs text-slate-500">
+              <p className="panel rounded-[22px] p-4 text-xs text-slate-500">
                 Connect wallet to load your chats.
               </p>
             ) : null}
@@ -641,13 +670,13 @@ export default function ChatPage() {
                 onClick={() => {
                   void loadThread(thread.id, walletAddress);
                 }}
-                className={`w-full rounded-xl border px-3 py-2 text-left transition ${
+                className={`w-full rounded-[22px] border p-4 text-left transition ${
                   thread.id === activeThreadId
-                    ? "border-orange-300 bg-orange-50"
-                    : "border-slate-200 bg-white hover:bg-slate-50"
+                    ? "border-[rgba(109,98,246,0.18)] bg-[linear-gradient(135deg,rgba(236,233,255,0.9),rgba(255,255,255,0.85))] shadow-[0_16px_40px_rgba(109,98,246,0.12)]"
+                    : "border-[rgba(129,140,248,0.12)] bg-white/75 hover:bg-white"
                 }`}
               >
-                <p className="truncate text-sm font-semibold text-slate-800">{thread.title}</p>
+                <p className="truncate text-sm font-semibold text-slate-900">{thread.title}</p>
                 <p className="mt-1 text-[11px] text-slate-500">
                   {formatTimestamp(thread.lastMessageAt)}
                 </p>
@@ -656,16 +685,23 @@ export default function ChatPage() {
           </div>
         </aside>
 
-        <div className="flex min-h-[68vh] flex-col rounded-3xl border border-slate-200 bg-[#faf7f2] p-4 text-slate-900 shadow-[0_18px_40px_rgba(15,23,42,0.08)] md:p-5">
-          <div className="flex-1 space-y-6 overflow-y-auto pr-1">
+        <div className="panel flex flex-col rounded-[32px] p-4 md:p-5 overflow-hidden">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-[22px] border border-[rgba(129,140,248,0.12)] bg-[linear-gradient(180deg,rgba(255,255,255,0.84),rgba(243,245,255,0.9))] px-4 py-3">
+            <p className="text-base font-semibold tracking-tight text-slate-950">
+              {threads.find((thread) => thread.id === activeThreadId)?.title || "Select a thread"}
+            </p>
+            <span className="chip text-xs">{messages.length} messages</span>
+          </div>
+
+          <div className="min-h-0 flex-1 space-y-6 overflow-y-auto pr-1">
             {isLoadingThread ? (
-              <p className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-500">
+              <p className="panel-muted rounded-[24px] p-4 text-sm text-slate-500">
                 Loading messages...
               </p>
             ) : null}
 
             {!isLoadingThread && messages.length === 0 ? (
-              <p className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-500">
+              <p className="panel-muted rounded-[24px] p-4 text-sm text-slate-500">
                 Start the conversation in this thread.
               </p>
             ) : null}
@@ -678,31 +714,95 @@ export default function ChatPage() {
                 }`}
               >
                 <div
-                  className={`max-w-[78%] whitespace-pre-wrap ${
+                  className={`max-w-[82%] min-w-0 whitespace-pre-wrap break-all ${
                     message.role === "user"
-                      ? "rounded-full bg-slate-900 px-5 py-3 text-right text-sm leading-6 text-white shadow-[0_10px_24px_rgba(15,23,42,0.18)] md:text-base"
-                      : "rounded-3xl bg-white px-4 py-3 text-left text-sm leading-7 text-slate-800 shadow-[0_8px_20px_rgba(15,23,42,0.06)] md:text-base"
+                      ? "rounded-[24px] bg-[linear-gradient(135deg,#6758f5,#5343e7)] px-5 py-4 text-right text-sm leading-6 text-white shadow-[0_18px_38px_rgba(92,77,234,0.22)] md:text-base"
+                      : "rounded-[26px] border border-[rgba(129,140,248,0.1)] bg-white px-5 py-4 text-left text-sm leading-7 text-slate-800 shadow-[0_12px_28px_rgba(91,98,161,0.08)] md:text-base"
                   }`}
                 >
-                  {message.content || "..."}
+                  {message.content || (
+                    message.role === "assistant" && isSending ? (
+                      <span className="inline-flex items-center gap-1.5 py-0.5">
+                        <span className="typing-dot" />
+                        <span className="typing-dot" />
+                        <span className="typing-dot" />
+                      </span>
+                    ) : "..."
+                  )}
+                  {message.role === "assistant" && message.actions.length > 0 ? (
+                    <div className="mt-4 space-y-2 border-t border-[rgba(129,140,248,0.12)] pt-3">
+                      {message.actions.map((action) => {
+                        const launchStatus = readActionResultField(action, "launchStatus");
+                        const tokenAddress = readActionResultField(action, "tokenAddress");
+                        const poolAddress = readActionResultField(action, "poolAddress");
+                        const errorMessage = readActionResultField(action, "errorMessage");
+                        const statusLabel =
+                          action.status === "completed"
+                            ? "Success"
+                            : launchStatus === "launch_pending"
+                              ? "Pending"
+                              : action.status === "failed"
+                                ? "Failed"
+                                : "In progress";
+                        const statusClass =
+                          action.status === "completed"
+                            ? "bg-emerald-100 text-emerald-700"
+                            : launchStatus === "launch_pending"
+                              ? "bg-amber-100 text-amber-700"
+                              : action.status === "failed"
+                                ? "bg-rose-100 text-rose-700"
+                                : "bg-slate-100 text-slate-700";
+
+                        return (
+                          <div
+                            key={action.id}
+                            className="rounded-[18px] bg-[rgba(241,245,249,0.85)] px-3 py-3 text-xs leading-5 text-slate-700"
+                          >
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <span className="font-semibold text-slate-900">
+                                {action.tool === "launch_token" ? "Token launch" : action.tool}
+                              </span>
+                              <span className={`rounded-full px-2 py-0.5 font-semibold ${statusClass}`}>
+                                {statusLabel}
+                              </span>
+                            </div>
+                            {tokenAddress ? (
+                              <p className="mt-2">Token: {compactAddress(tokenAddress)}</p>
+                            ) : null}
+                            {poolAddress ? (
+                              <p>Pool: {compactAddress(poolAddress)}</p>
+                            ) : null}
+                            {action.txHash ? (
+                              <p>Tx: {compactAddress(action.txHash)}</p>
+                            ) : null}
+                            {errorMessage ? <p>Reason: {errorMessage}</p> : null}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : null}
                 </div>
               </div>
             ))}
+            <div ref={messagesEndRef} />
           </div>
 
-          <form className="mt-4 border-t border-slate-200 pt-4" onSubmit={sendThreadReply}>
+          <form
+            className="mt-4 border-t border-[rgba(129,140,248,0.12)] pt-4"
+            onSubmit={sendThreadReply}
+          >
             <textarea
-              className="min-h-[96px] w-full rounded-2xl border border-slate-300 bg-white px-4 py-4 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:ring-2 focus:ring-orange-100"
+              className="app-input min-h-[108px] w-full rounded-[24px] px-4 py-4 text-sm"
               placeholder="Ask the assistant to deploy/check/transfer..."
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
             />
-            <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
               
               <button
                 type="submit"
                 disabled={!canSend}
-                className="rounded-full bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
+                className="button-primary rounded-full px-5 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {isSending ? "Sending..." : "Send"}
               </button>
@@ -710,12 +810,12 @@ export default function ChatPage() {
           </form>
 
           {errorMessage ? (
-            <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-900">
+            <div className="status-danger mt-4 rounded-[24px] border p-4 text-sm">
               {errorMessage}
             </div>
           ) : null}
         </div>
       </section>
-    </main>
+    </AppShell>
   );
 }

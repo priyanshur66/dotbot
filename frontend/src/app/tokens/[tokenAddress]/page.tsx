@@ -4,9 +4,10 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { ethers } from "ethers";
-import { AppNavbar } from "@/components/app-navbar";
+import { AppShell } from "@/components/app-navbar";
 import { WalletGate } from "@/components/wallet-gate";
 import { useWallet } from "@/components/wallet-provider";
+import { ERC20_ABI } from "@/lib/erc20";
 import { ensureWalletOnChain, POLKADOT_HUB_TESTNET } from "@/lib/wallet";
 import type { TokenCandle, TokenEvent, TokenLaunch } from "@/lib/tokens";
 
@@ -24,12 +25,6 @@ type TokenCandlesResponse = {
   candles?: TokenCandle[];
   message?: string;
 };
-
-const ERC20_ABI = [
-  "function approve(address spender, uint256 amount) external returns (bool)",
-  "function allowance(address owner, address spender) view returns (uint256)",
-  "function balanceOf(address owner) view returns (uint256)",
-];
 
 const AMM_POOL_ABI = [
   "function getAmountOutForQuoteIn(uint256 quoteAmountIn) view returns (uint256)",
@@ -91,34 +86,66 @@ function formatTimestamp(timestamp?: number | null) {
   });
 }
 
+const MIN_SLOTS = 30;
+const CHART_W = 720;
+const CHART_H = 280;
+const AXIS_W = 70; // right axis width
+const PADDING_TOP = 16;
+const PADDING_BOTTOM = 24;
+
+function formatPriceLabel(value: number): string {
+  if (value === 0) return "0";
+  if (value < 0.000001) return value.toExponential(2);
+  if (value < 0.001) return value.toFixed(7);
+  if (value < 1) return value.toFixed(6);
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(2)}K`;
+  return value.toFixed(2);
+}
+
 function CandleChart({
   candles,
   variant = "light",
+  tokenSymbol,
+  intervalLabel,
+  latestPrice,
 }: {
   candles: TokenCandle[];
   variant?: "light" | "dark";
+  tokenSymbol?: string;
+  intervalLabel?: string;
+  latestPrice?: string;
 }) {
-  const points = useMemo(() => {
-    if (!candles.length) {
-      return [];
-    }
-    const highs = candles.map((item) => Number(ethers.formatUnits(item.high, 18)));
-    const lows = candles.map((item) => Number(ethers.formatUnits(item.low, 18)));
+  const { points, priceLabels } = useMemo(() => {
+    if (!candles.length) return { points: [], priceLabels: [] };
+
+    const highs = candles.map((c) => Number(ethers.formatUnits(c.high, 18)));
+    const lows = candles.map((c) => Number(ethers.formatUnits(c.low, 18)));
     const maxHigh = Math.max(...highs);
     const minLow = Math.min(...lows);
-    const range = maxHigh - minLow || 1;
-    const width = 760;
-    const height = 300;
-    const gap = width / Math.max(candles.length, 1);
-    const candleWidth = Math.max(4, gap * 0.55);
+    const range = maxHigh - minLow || maxHigh * 0.1 || 1;
 
-    return candles.map((candle, index) => {
+    // padding so candles don't touch top/bottom
+    const paddedMin = minLow - range * 0.08;
+    const paddedMax = maxHigh + range * 0.08;
+    const paddedRange = paddedMax - paddedMin || 1;
+
+    const usableH = CHART_H - PADDING_TOP - PADDING_BOTTOM;
+    const scaleY = (price: number) =>
+      PADDING_TOP + usableH - ((price - paddedMin) / paddedRange) * usableH;
+
+    // Always show at least MIN_SLOTS slots; candles are right-aligned
+    const totalSlots = Math.max(candles.length, MIN_SLOTS);
+    const gap = CHART_W / totalSlots;
+    const candleWidth = Math.max(3, gap * 0.6);
+    const startOffset = (totalSlots - candles.length) * gap;
+
+    const pts = candles.map((candle, i) => {
       const open = Number(ethers.formatUnits(candle.open, 18));
       const high = Number(ethers.formatUnits(candle.high, 18));
       const low = Number(ethers.formatUnits(candle.low, 18));
       const close = Number(ethers.formatUnits(candle.close, 18));
-      const x = index * gap + gap / 2;
-      const scaleY = (price: number) => height - ((price - minLow) / range) * (height - 24) - 12;
+      const x = startOffset + i * gap + gap / 2;
       return {
         x,
         candleWidth,
@@ -127,68 +154,122 @@ function CandleChart({
         highY: scaleY(high),
         lowY: scaleY(low),
         positive: close >= open,
+        key: candle.bucketStart,
       };
     });
+
+    // Generate 5 horizontal price grid labels
+    const numLabels = 5;
+    const labels = Array.from({ length: numLabels }, (_, i) => {
+      const price = paddedMin + (paddedRange * i) / (numLabels - 1);
+      const y = scaleY(price);
+      return { price, y };
+    }).reverse();
+
+    return { points: pts, priceLabels: labels };
   }, [candles]);
+
+  const isDark = variant === "dark";
+  const bg = isDark ? "#0f0e27" : "#f8fafc";
+  const gridColor = isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.06)";
+  const labelColor = isDark ? "#9ca3af" : "#64748b";
+  const totalWidth = CHART_W + AXIS_W;
 
   if (!candles.length) {
     return (
       <div
-        className={`rounded-[28px] border p-6 text-sm ${
-          variant === "dark"
-            ? "border-white/10 bg-slate-950 text-slate-300"
-            : "border-slate-200 bg-white/80 text-slate-500"
+        className={`flex h-52 items-center justify-center rounded-2xl border text-sm ${
+          isDark
+            ? "border-white/10 bg-[#1d1c45] text-slate-400"
+            : "border-slate-200 bg-slate-50 text-slate-500"
         }`}
       >
-        No candle data indexed yet.
+        No candle data yet — activity will appear here once trades are indexed.
       </div>
     );
   }
 
   return (
     <div
-      className={`overflow-x-auto rounded-[28px] border p-4 ${
-        variant === "dark"
-          ? "border-white/10 bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 shadow-[0_25px_60px_rgba(15,23,42,0.45)]"
-          : "border-slate-200 bg-white/90"
+      className={`overflow-x-auto rounded-2xl ${
+        isDark
+          ? "bg-[#0f0e27]"
+          : "border border-slate-200 bg-white"
       }`}
     >
-      <svg viewBox="0 0 760 300" className="h-[300px] w-full min-w-[760px]">
-        <rect
-          x="0"
-          y="0"
-          width="760"
-          height="300"
-          rx="18"
-          fill={variant === "dark" ? "#050816" : "rgba(248,250,252,0.75)"}
-        />
-        {points.map((point, index) => {
+      <svg
+        viewBox={`0 0 ${totalWidth} ${CHART_H}`}
+        className="h-[280px] w-full"
+        style={{ minWidth: 320 }}
+      >
+        {/* background */}
+        <rect x={0} y={0} width={totalWidth} height={CHART_H} fill={bg} rx={0} />
+
+        {/* horizontal grid lines + price labels */}
+        {priceLabels.map((label, i) => (
+          <g key={i}>
+            <line
+              x1={0}
+              x2={CHART_W}
+              y1={label.y}
+              y2={label.y}
+              stroke={gridColor}
+              strokeWidth={1}
+              strokeDasharray="4 4"
+            />
+            <text
+              x={CHART_W + 8}
+              y={label.y + 4}
+              fill={labelColor}
+              fontSize={10}
+              fontFamily="monospace"
+            >
+              {formatPriceLabel(label.price)}
+            </text>
+          </g>
+        ))}
+
+        {/* candles */}
+        {points.map((point) => {
           const bodyTop = Math.min(point.openY, point.closeY);
-          const bodyHeight = Math.max(3, Math.abs(point.closeY - point.openY));
-          const color = point.positive ? "#0f766e" : "#c2410c";
+          const bodyHeight = Math.max(2, Math.abs(point.closeY - point.openY));
+          const color = point.positive ? "#7c6ffc" : "#f87171";
+          const fillColor = point.positive ? "#7c6ffc" : "#f87171";
           return (
-            <g key={candles[index].bucketStart}>
+            <g key={point.key}>
+              {/* high-low wick */}
               <line
                 x1={point.x}
                 x2={point.x}
                 y1={point.highY}
                 y2={point.lowY}
                 stroke={color}
-                strokeWidth="2"
+                strokeWidth={1.5}
                 strokeLinecap="round"
               />
+              {/* open-close body */}
               <rect
                 x={point.x - point.candleWidth / 2}
                 y={bodyTop}
                 width={point.candleWidth}
                 height={bodyHeight}
-                rx="3"
-                fill={color}
-                opacity="0.9"
+                rx={2}
+                fill={fillColor}
+                opacity={0.9}
               />
             </g>
           );
         })}
+
+        {/* axis separator */}
+        <line
+          x1={CHART_W}
+          x2={CHART_W}
+          y1={0}
+          y2={CHART_H}
+          stroke={gridColor}
+          strokeWidth={1}
+        />
       </svg>
     </div>
   );
@@ -340,75 +421,97 @@ export default function TokenDetailPage() {
   }
 
   return (
-    <main className="mx-auto w-full max-w-7xl px-4 py-6 md:px-8 md:py-8">
-      <div className="mb-6">
-        <AppNavbar />
-      </div>
-
-      <section className="fade-in rounded-[32px] border border-slate-200 bg-white/85 p-6 shadow-[0_24px_70px_rgba(15,23,42,0.08)] backdrop-blur-sm md:p-8">
-        <div className="flex flex-col gap-4">
-          <div className="flex flex-col gap-4 md:flex-row md:items-center">
-            <div className="flex h-20 w-20 items-center justify-center rounded-[24px] bg-gradient-to-br from-slate-200 to-slate-100 text-2xl font-semibold text-slate-500">
+    <AppShell
+      eyebrow="Token Detail"
+      title={token ? `${token.tokenName} (${token.tokenSymbol})` : shortenHash(tokenAddress)}
+      description="Market activity, metadata, and trading in one place."
+      action={
+        <button
+          type="button"
+          onClick={() => void loadToken(interval)}
+          className="button-secondary inline-flex items-center justify-center gap-2 rounded-full px-5 py-3 text-sm font-semibold transition"
+        >
+          ↻ Refresh
+        </button>
+      }
+    >
+      {/* ── Hero banner ─────────────────────────────────────── */}
+      <section className="accent-panel fade-in rounded-[28px] px-6 py-6 md:px-8 md:py-7">
+        <div className="relative z-10 flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
+          <div className="flex items-center gap-4">
+            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-[18px] border border-white/20 bg-white/14 text-xl font-bold text-white">
               {token ? token.tokenName.slice(0, 1).toUpperCase() : "T"}
             </div>
             <div>
-              <div className="flex flex-wrap items-center gap-3">
-                <h1 className="text-4xl font-semibold tracking-tight text-slate-950 md:text-5xl">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-2xl font-bold tracking-tight text-white md:text-3xl">
                   {token ? token.tokenName : shortenHash(tokenAddress)}
-                </h1>
+                </h2>
                 {token ? (
-                  <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">
+                  <span className="rounded-full border border-white/22 bg-white/14 px-3 py-0.5 text-xs font-semibold uppercase tracking-widest text-white/90">
                     {token.launchStatus}
                   </span>
                 ) : null}
               </div>
-              <p className="mt-2 font-mono text-sm text-slate-500">
+              <p className="mt-1 font-mono text-sm text-white/70">
                 {token ? `$${token.tokenSymbol}` : tokenAddress}
               </p>
             </div>
           </div>
+
+          {token ? (
+            <div className="grid grid-cols-3 gap-3 sm:gap-4">
+              {[
+                { label: "Price", value: `$${formatPrice(token.stats?.latestPrice || token.initialPrice)}` },
+                { label: "Liquidity", value: `$${formatQuoteAmount(token.stats?.liquidityQuote)}` },
+                { label: "Trades", value: String(token.stats?.tradeCount ?? 0) },
+              ].map(({ label, value }) => (
+                <div key={label} className="rounded-[18px] border border-white/16 bg-white/10 px-4 py-3 text-center">
+                  <p className="text-[10px] uppercase tracking-widest text-white/60">{label}</p>
+                  <p className="mt-1 text-base font-bold text-white">{value}</p>
+                </div>
+              ))}
+            </div>
+          ) : null}
         </div>
       </section>
 
+      {/* ── Alerts ──────────────────────────────────────────── */}
       {errorMessage ? (
-        <div className="mt-6 rounded-[24px] border border-red-200 bg-red-50 p-4 text-sm text-red-900">
-          {errorMessage}
-        </div>
+        <div className="status-danger mt-5 rounded-2xl border p-4 text-sm">{errorMessage}</div>
       ) : null}
-
       {loading && !token ? (
-        <div className="mt-6 rounded-[24px] border border-slate-200 bg-white/80 p-6 text-sm text-slate-500">
-          Loading token view...
+        <div className="panel mt-5 rounded-2xl p-6 text-sm text-slate-500">
+          Loading token…
         </div>
       ) : null}
 
       {token ? (
-        <>
-          <div className="mt-6 grid gap-6 lg:grid-cols-[1.55fr_0.75fr]">
-            <section className="rounded-[32px] border border-slate-200 bg-white/90 p-5 shadow-[0_18px_60px_rgba(15,23,42,0.08)] md:p-6">
-              <div className="flex flex-col gap-4 border-b border-slate-100 pb-5 lg:flex-row lg:items-end lg:justify-between">
+        <div className="mt-5 space-y-5">
+
+          {/* ── Row 1: Chart (left 60%) + Sidebar (right 40%) ── */}
+          <div className="grid gap-5 xl:grid-cols-[1fr_380px]">
+
+            {/* Chart panel */}
+            <section className="panel rounded-[24px] p-5">
+              <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">
-                    Market view
-                  </p>
-                  <h2 className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">
-                    Price / MCAP
-                  </h2>
-                  <p className="mt-1 text-sm text-slate-600">
-                    Event-sourced candles built from indexed swaps and launch liquidity.
+                  <p className="shell-kicker">Market View</p>
+                  <h3 className="mt-1 text-lg font-bold tracking-tight text-slate-900">
+                    Price Chart
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Event-sourced candles from indexed swaps &amp; launch liquidity
                   </p>
                 </div>
-
-                <div className="flex flex-wrap gap-2">
+                <div className="flex items-center gap-2">
                   {(["1m", "5m", "1h", "1d"] as const).map((value) => (
                     <button
                       key={value}
                       type="button"
                       onClick={() => setInterval(value)}
                       className={`rounded-full px-4 py-2 text-xs font-semibold transition ${
-                        interval === value
-                          ? "bg-slate-950 text-white"
-                          : "border border-slate-200 bg-white text-slate-600 hover:border-slate-300"
+                        interval === value ? "button-primary" : "button-secondary"
                       }`}
                     >
                       {value}
@@ -417,148 +520,113 @@ export default function TokenDetailPage() {
                 </div>
               </div>
 
-              <div className="mt-5 rounded-[28px] border border-slate-200 bg-slate-950 p-4">
-                <div className="mb-3 flex items-center justify-between text-xs text-slate-400">
-                  <span>
-                    {token.tokenSymbol}/USD • {interval}
-                  </span>
-                  <span>${formatPrice(token.stats?.latestPrice || token.initialPrice)}</span>
-                </div>
-                <CandleChart candles={candles} variant="dark" />
+              {/* Chart header bar */}
+              <div className="mb-2 flex items-center justify-between rounded-xl bg-[#0f0e27] px-4 py-2 text-xs">
+                <span className="font-mono text-slate-400">
+                  {token.tokenSymbol}/USD · {interval}
+                </span>
+                <span className="font-mono font-semibold text-white">
+                  ${formatPrice(token.stats?.latestPrice || token.initialPrice)}
+                </span>
               </div>
 
-              <div className="mt-5 grid gap-3 md:grid-cols-3">
-                <div className="rounded-[22px] border border-slate-200 bg-slate-50/80 p-4">
-                  <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Price</p>
-                  <p className="mt-2 text-lg font-semibold text-slate-950">
-                    ${formatPrice(token.stats?.latestPrice || token.initialPrice)}
-                  </p>
-                </div>
-                <div className="rounded-[22px] border border-slate-200 bg-slate-50/80 p-4">
-                  <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Liquidity</p>
-                  <p className="mt-2 text-lg font-semibold text-slate-950">
-                    ${formatQuoteAmount(token.stats?.liquidityQuote)}
-                  </p>
-                </div>
-                <div className="rounded-[22px] border border-slate-200 bg-slate-50/80 p-4">
-                  <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Trades</p>
-                  <p className="mt-2 text-lg font-semibold text-slate-950">
-                    {token.stats?.tradeCount ?? 0}
-                  </p>
-                </div>
-              </div>
+              <CandleChart
+                candles={candles}
+                variant="dark"
+                tokenSymbol={token.tokenSymbol}
+                intervalLabel={interval}
+                latestPrice={token.stats?.latestPrice || token.initialPrice || undefined}
+              />
+
+              <p className="mt-2 text-right text-[10px] text-slate-400">
+                {candles.length} candle{candles.length !== 1 ? "s" : ""} · {interval} interval
+              </p>
             </section>
 
-            <aside className="space-y-6">
-              <section className="rounded-[32px] border border-slate-200 bg-white p-5 shadow-sm">
-                <h2 className="text-xl font-semibold tracking-tight text-slate-950">Token Info</h2>
-                <div className="mt-5 space-y-4 text-sm text-slate-700">
-                  <div className="flex items-start justify-between gap-4">
-                    <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                      Launcher
-                    </span>
-                    <span className="max-w-[60%] break-all text-right font-mono text-slate-900">
-                      {shortenHash(launcherAddress)}
-                    </span>
-                  </div>
-                  <div className="flex items-start justify-between gap-4">
-                    <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                      Fee recipient
-                    </span>
-                    <span className="max-w-[60%] break-all text-right font-mono text-slate-900">
-                      {shortenHash(feeRecipientAddress)}
-                    </span>
-                  </div>
-                  <div className="flex items-start justify-between gap-4">
-                    <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                      Chain
-                    </span>
-                    <span className="font-semibold text-slate-950">{token.networkName}</span>
-                  </div>
-                  <div className="flex items-start justify-between gap-4">
-                    <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                      Contract
-                    </span>
-                    <span className="max-w-[60%] break-all text-right font-mono text-slate-900">
-                      {shortenHash(token.tokenAddress)}
-                    </span>
-                  </div>
-                  <div className="flex items-start justify-between gap-4">
-                    <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                      Transaction
-                    </span>
-                    <span className="max-w-[60%] break-all text-right font-mono text-slate-900">
-                      {shortenHash(token.launchTxHash || token.deployTxHash)}
-                    </span>
-                  </div>
+            {/* Right sidebar */}
+            <aside className="flex flex-col gap-5">
+
+              {/* Token Info */}
+              <section className="panel-soft rounded-[24px] p-5">
+                <h3 className="text-base font-bold tracking-tight text-slate-900">Token Info</h3>
+
+                <div className="mt-4 space-y-3">
+                  {[
+                    { label: "Launcher", value: launcherAddress, mono: true },
+                    { label: "Fee Recipient", value: feeRecipientAddress, mono: true },
+                    { label: "Chain", value: token.networkName || "unknown", mono: false },
+                    { label: "Contract", value: token.tokenAddress, mono: true },
+                    { label: "Launch Tx", value: token.launchTxHash || token.deployTxHash, mono: true },
+                  ].map(({ label, value, mono }) => (
+                    <div key={label} className="flex items-start justify-between gap-3">
+                      <span className="shrink-0 text-[11px] font-semibold uppercase tracking-widest text-slate-400">
+                        {label}
+                      </span>
+                      <span
+                        className={`max-w-[55%] truncate text-right text-sm font-medium text-slate-900 ${mono ? "font-mono" : ""}`}
+                        title={value || ""}
+                      >
+                        {value ? shortenHash(value) : "n/a"}
+                      </span>
+                    </div>
+                  ))}
                 </div>
 
-                <div className="mt-5 grid gap-3">
+                <div className="mt-4 grid grid-cols-2 gap-2">
                   <Link
                     href={contractExplorer}
                     target="_blank"
                     rel="noreferrer"
-                    className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+                    className="button-secondary inline-flex items-center justify-center rounded-xl px-3 py-2.5 text-xs font-semibold transition"
                   >
-                    View on Explorer
+                    View on Explorer ↗
                   </Link>
                   <button
                     type="button"
-                    onClick={() => {
-                      void navigator.clipboard.writeText(token.tokenAddress);
-                    }}
-                    className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+                    onClick={() => void navigator.clipboard.writeText(token.tokenAddress)}
+                    className="button-secondary inline-flex items-center justify-center rounded-xl px-3 py-2.5 text-xs font-semibold transition"
                   >
-                    Copy Contract Address
+                    Copy Address
                   </button>
                 </div>
               </section>
 
-              <section className="rounded-[32px] border border-slate-200 bg-white p-5 shadow-sm">
-                <div className="flex items-center justify-between gap-4">
+              {/* Trade panel */}
+              <section className="panel-soft rounded-[24px] p-5">
+                <div className="mb-4 flex items-start justify-between gap-3">
                   <div>
-                    <h2 className="text-xl font-semibold tracking-tight text-slate-950">Trade</h2>
-                    <p className="mt-1 text-sm text-slate-600">
-                      Buy or sell directly from your wallet against this pool.
+                    <h3 className="text-base font-bold tracking-tight text-slate-900">Trade</h3>
+                    <p className="mt-0.5 text-xs text-slate-500">
+                      Buy or sell from your wallet against this pool.
                     </p>
                   </div>
-                  <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-600">
-                    {walletAddress ? shortenHash(walletAddress) : "wallet not connected"}
+                  <span className="chip shrink-0 font-mono text-xs">
+                    {walletAddress ? shortenHash(walletAddress) : "—"}
                   </span>
                 </div>
 
-                <form className="mt-5 space-y-4" onSubmit={onTrade}>
+                <form className="space-y-3" onSubmit={onTrade}>
                   <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setTradeSide("buy")}
-                      className={`rounded-2xl px-4 py-3 text-sm font-semibold transition ${
-                        tradeSide === "buy"
-                          ? "bg-emerald-700 text-white"
-                          : "border border-slate-200 bg-white text-slate-700 hover:border-slate-300"
-                      }`}
-                    >
-                      Buy
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setTradeSide("sell")}
-                      className={`rounded-2xl px-4 py-3 text-sm font-semibold transition ${
-                        tradeSide === "sell"
-                          ? "bg-slate-950 text-white"
-                          : "border border-slate-200 bg-white text-slate-700 hover:border-slate-300"
-                      }`}
-                    >
-                      Sell
-                    </button>
+                    {(["buy", "sell"] as const).map((side) => (
+                      <button
+                        key={side}
+                        type="button"
+                        onClick={() => setTradeSide(side)}
+                        className={`rounded-xl py-2.5 text-sm font-semibold capitalize transition ${
+                          tradeSide === side ? "button-primary" : "button-secondary"
+                        }`}
+                      >
+                        {side}
+                      </button>
+                    ))}
                   </div>
 
-                  <label className="flex flex-col gap-2">
-                    <span className="text-sm font-medium text-slate-700">
+                  <label className="flex flex-col gap-1.5">
+                    <span className="text-xs font-semibold text-slate-600">
                       Amount in {tradeSide === "buy" ? "USDT" : token.tokenSymbol}
                     </span>
                     <input
-                      className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition placeholder:text-slate-400 focus:border-slate-400"
+                      className="app-input rounded-xl px-4 py-2.5 text-sm"
                       value={tradeAmount}
                       onChange={(e) => setTradeAmount(e.target.value)}
                       placeholder={tradeSide === "buy" ? "100" : "2500"}
@@ -568,116 +636,142 @@ export default function TokenDetailPage() {
                   <button
                     type="submit"
                     disabled={isSubmittingTrade}
-                    className="inline-flex w-full items-center justify-center rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                    className="button-primary inline-flex w-full items-center justify-center rounded-xl py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    {isSubmittingTrade ? "Submitting..." : `Confirm ${tradeSide}`}
+                    {isSubmittingTrade ? "Submitting…" : `Confirm ${tradeSide}`}
                   </button>
                 </form>
 
-                <div className="mt-4 space-y-2 text-xs text-slate-500">
-                  <p>Pool: {shortenHash(token.poolAddress)}</p>
-                  <p>Quote token: {shortenHash(token.quoteTokenAddress)}</p>
-                  <p>Launch tx: {shortenHash(token.launchTxHash || token.deployTxHash)}</p>
-                </div>
-
                 {tradeStatus ? (
-                  <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-xs leading-6 text-slate-700">
+                  <div className="panel-muted mt-3 rounded-xl p-3 text-xs leading-relaxed text-slate-700 break-all">
                     {tradeStatus}
                   </div>
                 ) : null}
+
+                <div className="mt-3 space-y-1 text-[11px] text-slate-400">
+                  <p>Pool: <span className="font-mono">{shortenHash(token.poolAddress)}</span></p>
+                  <p>Quote: <span className="font-mono">{shortenHash(token.quoteTokenAddress)}</span></p>
+                </div>
               </section>
             </aside>
           </div>
 
-          <div className="mt-6 grid gap-6 lg:grid-cols-[0.85fr_1.15fr]">
-            <section className="rounded-[32px] border border-slate-200 bg-white p-5 shadow-sm md:p-6">
-              <h2 className="text-xl font-semibold tracking-tight text-slate-950">
+          {/* ── Row 2: Launch Metadata + Recent Activity ──────── */}
+          <div className="grid gap-5 lg:grid-cols-2">
+
+            {/* Launch Metadata */}
+            <section className="panel rounded-[24px] p-5">
+              <h3 className="mb-4 text-base font-bold tracking-tight text-slate-900">
                 Launch Metadata
-              </h2>
-              <div className="mt-4 space-y-3 text-sm text-slate-700">
-                <p className="break-all font-mono text-xs">Creator: {token.creatorAddress}</p>
-                <p className="break-all font-mono text-xs">Owner: {token.ownerAddress}</p>
-                <p className="break-all font-mono text-xs">Pool: {token.poolAddress || "n/a"}</p>
-                <p className="break-all font-mono text-xs">
-                  Quote token: {token.quoteTokenAddress || "n/a"}
-                </p>
-                <p className="break-all font-mono text-xs">
-                  EventHub: {token.eventHubAddress || "n/a"}
-                </p>
-                <p>
-                  Creator allocation: {formatTokenAmount(token.creatorAllocation)} {token.tokenSymbol}
-                </p>
-                <p>
-                  Pool token allocation: {formatTokenAmount(token.poolTokenAllocation)} {token.tokenSymbol}
-                </p>
-                <p>Pool USDT allocation: ${formatQuoteAmount(token.poolUsdtAllocation)}</p>
-                <p>Swap fee: {token.swapFeeBps ?? 0} bps</p>
-                <p>Creator fee share: {token.creatorFeeShareBps ?? 0} bps</p>
-                <p>Launch tx: {shortenHash(token.launchTxHash || token.deployTxHash)}</p>
+              </h3>
+              <div className="space-y-2.5 text-sm">
+                {[
+                  { label: "Creator", value: token.creatorAddress, mono: true },
+                  { label: "Owner", value: token.ownerAddress, mono: true },
+                  { label: "Pool", value: token.poolAddress, mono: true },
+                  { label: "Quote token", value: token.quoteTokenAddress, mono: true },
+                  { label: "EventHub", value: token.eventHubAddress, mono: true },
+                ].map(({ label, value, mono }) => (
+                  <div key={label} className="flex items-center justify-between gap-3">
+                    <span className="shrink-0 text-xs text-slate-500">{label}</span>
+                    <span
+                      className={`truncate text-right text-xs text-slate-800 ${mono ? "font-mono" : ""}`}
+                      title={value || "n/a"}
+                    >
+                      {value || "n/a"}
+                    </span>
+                  </div>
+                ))}
+                <div className="my-1 border-t border-slate-100" />
+                {[
+                  { label: "Creator allocation", value: `${formatTokenAmount(token.creatorAllocation)} ${token.tokenSymbol}` },
+                  { label: "Pool token allocation", value: `${formatTokenAmount(token.poolTokenAllocation)} ${token.tokenSymbol}` },
+                  { label: "Pool USDT allocation", value: `$${formatQuoteAmount(token.poolUsdtAllocation)}` },
+                  { label: "Swap fee", value: `${token.swapFeeBps ?? 0} bps` },
+                  { label: "Creator fee share", value: `${token.creatorFeeShareBps ?? 0} bps` },
+                ].map(({ label, value }) => (
+                  <div key={label} className="flex items-center justify-between gap-3">
+                    <span className="text-xs text-slate-500">{label}</span>
+                    <span className="text-xs font-semibold text-slate-800">{value}</span>
+                  </div>
+                ))}
               </div>
             </section>
 
-            <section className="rounded-[32px] border border-slate-200 bg-white p-5 shadow-sm md:p-6">
-              <div className="mb-4 flex items-center justify-between gap-4">
+            {/* Recent Activity */}
+            <section className="panel rounded-[24px] p-5">
+              <div className="mb-4 flex items-center justify-between gap-3">
                 <div>
-                  <h2 className="text-xl font-semibold tracking-tight text-slate-950">
+                  <h3 className="text-base font-bold tracking-tight text-slate-900">
                     Recent Activity
-                  </h2>
-                  <p className="mt-1 text-sm text-slate-600">
-                    Latest indexed launch, liquidity, swap, and fee events.
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Latest indexed swaps, liquidity, and fee events
                   </p>
                 </div>
                 <button
                   type="button"
                   onClick={() => void loadToken(interval)}
-                  className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+                  className="button-secondary shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold transition"
                 >
                   Refresh
                 </button>
               </div>
 
-              <div className="space-y-3">
+              <div className="max-h-[420px] space-y-2.5 overflow-y-auto pr-1">
                 {events.length === 0 ? (
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5 text-sm text-slate-500">
+                  <div className="panel-muted rounded-xl p-5 text-sm text-slate-500">
                     No indexed activity yet.
                   </div>
-                ) : null}
-
-                {events.map((marketEvent) => (
-                  <article
-                    key={marketEvent.id}
-                    className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 text-sm text-slate-700"
-                  >
-                    <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                      <div>
-                        <p className="font-semibold text-slate-950">
-                          {marketEvent.eventType}
-                          {marketEvent.side ? ` • ${marketEvent.side.toUpperCase()}` : ""}
+                ) : (
+                  events.map((marketEvent) => {
+                    const isBuy = marketEvent.side?.toLowerCase() === "buy";
+                    const isSell = marketEvent.side?.toLowerCase() === "sell";
+                    return (
+                      <article
+                        key={marketEvent.id}
+                        className="rounded-xl border border-[rgba(129,140,248,0.12)] bg-white/70 p-3 text-xs text-slate-700"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={`rounded-md px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest ${
+                                isBuy
+                                  ? "bg-violet-100 text-violet-700"
+                                  : isSell
+                                  ? "bg-red-100 text-red-600"
+                                  : "bg-slate-100 text-slate-600"
+                              }`}
+                            >
+                              {marketEvent.side ? marketEvent.side.toUpperCase() : marketEvent.eventType}
+                            </span>
+                            <span className="text-slate-600">{marketEvent.eventType}</span>
+                          </div>
+                          {marketEvent.priceQuoteE18 ? (
+                            <span className="font-mono font-semibold text-slate-900">
+                              ${formatPrice(marketEvent.priceQuoteE18)}
+                            </span>
+                          ) : null}
+                        </div>
+                        <p className="mt-1.5 text-[10px] text-slate-400">
+                          {formatTimestamp(marketEvent.blockTimestamp * 1000)} ·{" "}
+                          <span className="font-mono">{shortenHash(marketEvent.txHash)}</span>
                         </p>
-                        <p className="mt-1 text-xs text-slate-500">
-                          {formatTimestamp(marketEvent.blockTimestamp * 1000)} • tx{" "}
-                          {shortenHash(marketEvent.txHash)}
-                        </p>
-                      </div>
-                      {marketEvent.priceQuoteE18 ? (
-                        <p className="text-sm font-semibold text-slate-950">
-                          ${formatPrice(marketEvent.priceQuoteE18)}
-                        </p>
-                      ) : null}
-                    </div>
-                    <div className="mt-3 grid gap-2 text-xs text-slate-600 md:grid-cols-2">
-                      <p>Amount in: {marketEvent.amountIn ? marketEvent.amountIn : "n/a"}</p>
-                      <p>Amount out: {marketEvent.amountOut ? marketEvent.amountOut : "n/a"}</p>
-                      <p>Reserve token: {marketEvent.reserveTokenAfter || "n/a"}</p>
-                      <p>Reserve USDT: {marketEvent.reserveUsdtAfter || "n/a"}</p>
-                    </div>
-                  </article>
-                ))}
+                        <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-[10px] text-slate-500">
+                          <span>In: <span className="font-mono text-slate-700">{marketEvent.amountIn ? formatTokenAmount(marketEvent.amountIn) : "—"}</span></span>
+                          <span>Out: <span className="font-mono text-slate-700">{marketEvent.amountOut ? formatTokenAmount(marketEvent.amountOut) : "—"}</span></span>
+                          <span>Reserve token: <span className="font-mono text-slate-700">{marketEvent.reserveTokenAfter ? formatTokenAmount(marketEvent.reserveTokenAfter) : "—"}</span></span>
+                          <span>Reserve USDT: <span className="font-mono text-slate-700">{marketEvent.reserveUsdtAfter ? formatQuoteAmount(marketEvent.reserveUsdtAfter) : "—"}</span></span>
+                        </div>
+                      </article>
+                    );
+                  })
+                )}
               </div>
             </section>
           </div>
-        </>
+        </div>
       ) : null}
-    </main>
+    </AppShell>
   );
 }

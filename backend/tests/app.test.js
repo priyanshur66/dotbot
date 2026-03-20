@@ -1,5 +1,6 @@
 const request = require("supertest");
 const { createApp } = require("../src/app");
+const { AgentToolExecutionError } = require("../src/lib/errors");
 
 function makeTestApp(overrides = {}) {
   const deploymentService = {
@@ -64,6 +65,9 @@ describe("API", () => {
         rpcWriteUrlConfigured: true,
         backendPrivateKeyConfigured: true,
         convexUrlConfigured: true,
+        launchpadAddressConfigured: false,
+        eventHubAddressConfigured: false,
+        quoteTokenAddressConfigured: false,
       },
     });
   });
@@ -93,18 +97,6 @@ describe("API", () => {
     const response = await request(app).post("/api/tokens/deploy").send({
       name: "Token",
       symbol: "TOK",
-    });
-    expect(response.statusCode).toBe(400);
-    expect(response.body.error).toBe("BAD_REQUEST");
-  });
-
-  test("POST /api/tokens/deploy returns 400 when owner/admin mismatch", async () => {
-    const { app } = makeTestApp();
-    const response = await request(app).post("/api/tokens/deploy").send({
-      name: "Token",
-      symbol: "TOK",
-      ownerAddress: "0x1111111111111111111111111111111111111111",
-      adminAddress: "0x2222222222222222222222222222222222222222",
     });
     expect(response.statusCode).toBe(400);
     expect(response.body.error).toBe("BAD_REQUEST");
@@ -172,7 +164,7 @@ describe("API", () => {
     expect(launchOrchestrator.deployAndPersistLaunch).toHaveBeenCalledWith({
       name: "My Token",
       symbol: "MTK",
-      finalOwnerAddress: "0x1111111111111111111111111111111111111111",
+      creatorAddress: "0x1111111111111111111111111111111111111111",
     });
     expect(tokenRegistryService.createLaunchRecord).not.toHaveBeenCalled();
   });
@@ -402,5 +394,106 @@ describe("API", () => {
     expect(appendOrder).toEqual(["user", "assistant"]);
     expect(response.body.message.id).toBe("msg_assistant");
     expect(response.body.actions).toEqual([{ id: "act_1", tool: "deploy_fixed_supply_token" }]);
+  });
+
+  test("POST /api/agent/threads/:threadId/reply persists launch failure as assistant message", async () => {
+    const { app, chatHistoryService, agentService } = makeTestApp();
+    const appendOrder = [];
+
+    chatHistoryService.appendMessage
+      .mockImplementationOnce(async () => {
+        appendOrder.push("user");
+        return {
+          message: {
+            id: "msg_user",
+            threadId: "thread_1",
+            walletAddress: "0x1111111111111111111111111111111111111111",
+            role: "user",
+            content: "launch ffr token",
+            actions: [],
+            createdAt: 1742369001000,
+            requestId: "req_1",
+          },
+          thread: {
+            id: "thread_1",
+            walletAddress: "0x1111111111111111111111111111111111111111",
+            title: "Launch ffr token",
+            lastMessageAt: 1742369001000,
+            createdAt: 1742369000000,
+          },
+        };
+      })
+      .mockImplementationOnce(async ({ content, actions }) => {
+        appendOrder.push("assistant");
+        return {
+          message: {
+            id: "msg_assistant",
+            threadId: "thread_1",
+            walletAddress: "0x1111111111111111111111111111111111111111",
+            role: "assistant",
+            content,
+            actions,
+            createdAt: 1742369002000,
+            requestId: "req_1",
+          },
+          thread: {
+            id: "thread_1",
+            walletAddress: "0x1111111111111111111111111111111111111111",
+            title: "Launch ffr token",
+            lastMessageAt: 1742369002000,
+            createdAt: 1742369000000,
+          },
+        };
+      });
+
+    chatHistoryService.getThreadWithMessages.mockResolvedValue({
+      thread: {
+        id: "thread_1",
+        walletAddress: "0x1111111111111111111111111111111111111111",
+        title: "Launch ffr token",
+        lastMessageAt: 1742369001000,
+        createdAt: 1742369000000,
+      },
+      messages: [
+        {
+          id: "msg_user",
+          threadId: "thread_1",
+          walletAddress: "0x1111111111111111111111111111111111111111",
+          role: "user",
+          content: "launch ffr token",
+          actions: [],
+          createdAt: 1742369001000,
+          requestId: "req_1",
+        },
+      ],
+    });
+
+    agentService.chat.mockRejectedValue(
+      new AgentToolExecutionError("Failed to launch token through Launchpad", {
+        tool: "launch_token",
+        name: "ffr token",
+        symbol: "FFR",
+        creatorAddress: "0x1111111111111111111111111111111111111111",
+        recovery: "RPC rejected the launch transaction as too low priority.",
+      })
+    );
+
+    const response = await request(app)
+      .post("/api/agent/threads/thread_1/reply")
+      .send({
+        walletAddress: "0x1111111111111111111111111111111111111111",
+        content: "launch ffr token",
+        stream: false,
+      });
+
+    expect(response.statusCode).toBe(200);
+    expect(appendOrder).toEqual(["user", "assistant"]);
+    expect(response.body.message.content).toContain("Token launch failed.");
+    expect(response.body.message.content).toContain("Name: ffr token");
+    expect(response.body.actions).toHaveLength(1);
+    expect(response.body.actions[0]).toMatchObject({
+      tool: "launch_token",
+      status: "failed",
+    });
   });
 });
