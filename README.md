@@ -1,4 +1,4 @@
-# DotAgent Local Setup
+# DotBot Local Setup
 
 This repo contains:
 
@@ -7,7 +7,6 @@ This repo contains:
 - `backend/convex/`: Convex functions and schema
 - `backend/contracts/` + `script/`: Solidity contracts and Foundry deploy script
 
-The app is built around Polkadot Hub TestNet and a wallet-connected browser flow.
 
 ## 1. Prerequisites
 
@@ -18,7 +17,7 @@ Install these first:
 - A browser wallet such as MetaMask
 - A Convex account/project
 - An OpenRouter API key
-- A funded wallet/private key for Polkadot Hub TestNet if you want the backend to deploy contracts or launch tokens
+- A funded wallet/private key for Polkadot Hub TestNet 
 
 ## 2. Install Dependencies
 
@@ -37,9 +36,38 @@ npm install
 Copy the example env file:
 
 ```bash
-cd /Users/priyanshuranjan/developer/polkadot/dotagent/02/backend
 cp .env.example .env
 ```
+use these for quick setup 
+
+- `RPC_URL=https://services.polkadothub-rpc.com/testnet`
+- `RPC_WRITE_URL=https://eth-rpc-testnet.polkadot.io/`
+- `RPC_WRITE_USE_LEGACY=true`
+- `BACKEND_PRIVATE_KEY=`
+- `PORT=3030`
+- `CONVEX_URL=`
+- `OPENROUTER_API_KEY=`
+
+- `PROTOCOL_TREASURY_ADDRESS=0x6574E8DBb3a69991c4DB5c41dC99507eB31e8b46`
+
+- `EVENT_HUB_ADDRESS=0x6AA22fa4b6B4Afd6f27C7Eb361030BDd5eb1D35E`
+- `QUOTE_TOKEN_ADDRESS=0x4DE0df239240cead24621631453f2FAf653f9A71`
+- `LAUNCHPAD_ADDRESS=0x1749d1Cc0Cf9937f7FeEED330204F5e0F9f95d27`
+- `AGENT_TRADE_EXECUTOR_ADDRESS=0x099d4993672027c50FFdE130229a3fA21dE55592`
+
+
+- `LAUNCHPAD_POOL_ALLOCATION_BPS=8000`
+- `LAUNCHPAD_SWAP_FEE_BPS=100`
+- `LAUNCHPAD_CREATOR_FEE_SHARE_BPS=5000`
+- `LAUNCHPAD_INITIAL_USDT_LIQUIDITY=50000`
+- `LAUNCHPAD_BOOTSTRAP_USDT_MULTIPLIER=1000`
+
+
+- `TWITTER_BOT_ENABLED=true`
+- `TWITTER_BOT_TARGET_HANDLE=@TestingdevsAccs`
+- `TWITTER_BOT_POLL_MS=20000`
+- `TWITTER241_RAPIDAPI_KEY=`
+- `TWITTER241_RAPIDAPI_HOST=twitter241.p.rapidapi.com`
 
 Update `backend/.env` with real values for at least:
 
@@ -49,9 +77,6 @@ Update `backend/.env` with real values for at least:
 - `CONVEX_URL`
 - `OPENROUTER_API_KEY`
 - `PROTOCOL_TREASURY_ADDRESS`
-
-Optional but commonly used:
-
 - `OPENROUTER_MODEL`
 - `TWITTER_BOT_ENABLED`
 - `TWITTER_BOT_TARGET_HANDLE`
@@ -64,10 +89,6 @@ Launchpad contract addresses:
 - Leave `EVENT_HUB_ADDRESS`, `QUOTE_TOKEN_ADDRESS`, and `LAUNCHPAD_ADDRESS` blank on first run if you want the backend to bootstrap infrastructure automatically.
 - Fill them in if you already have deployed contracts you want to reuse.
 
-Notes:
-
-- The backend now loads `.env` first and then `.env.local`, with `.env.local` overriding `.env`.
-- That means Convex CLI setup written to `backend/.env.local` will affect `npm start`.
 
 ## 4. Configure Convex
 
@@ -104,12 +125,6 @@ Create `frontend/.env` with:
 BACKEND_BASE_URL=http://localhost:3030
 ```
 
-If you want, you can create it with:
-
-```bash
-cd /Users/priyanshuranjan/developer/polkadot/dotagent/02/frontend
-printf 'BACKEND_BASE_URL=http://localhost:3030\n' > .env
-```
 
 ## 6. Start The Backend
 
@@ -143,12 +158,7 @@ Notes:
 - use `npm run dev` for local development
 - `npm start` in the frontend only works after `npm run build`
 
-Production-style frontend run:
 
-```bash
-npm run build
-npm start
-```
 
 ## 8. Connect Your Wallet
 
@@ -181,28 +191,12 @@ npx convex dev --once
 
 Then restart the backend if needed.
 
-## 10. Running Checks
 
-Backend tests:
-
-```bash
-cd backend
-npm test
-```
-
-Frontend lint:
-
-```bash
-cd frontend
-npm run lint
-```
-
-## 11. Optional: Deploy Launchpad Manually With Foundry
+## 10. Optional: Deploy Launchpad Manually With Foundry
 
 If you prefer to deploy contracts manually instead of relying on backend bootstrap:
 
 ```bash
-cd /Users/priyanshuranjan/developer/polkadot/dotagent/02
 forge script script/DeployLaunchpad.s.sol:DeployLaunchpadScript \
   --rpc-url "$RPC_WRITE_URL" \
   --broadcast
@@ -259,6 +253,4 @@ npx convex dev --once
 npm start
 ```
 
-### Twitter bot delete/update behaves differently than expected
-
-This usually means the backend is talking to a different Convex deployment than the one you just pushed. Re-check the Convex setup step above.
+### Twitter api is easily exhausted make sure to have a short polling window
